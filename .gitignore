@@ -1,1 +1,64 @@
+# claude项目配置文件
+.cluade/
 CLAUDE.md
+# 1. 编译产物目录（CMake生成的build文件夹）
+/build/
+/bin/
+/lib/
+/Install/  # 安装目录（对应CMAKE_INSTALL_PREFIX）
+
+# 2. CMake临时文件
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+*.cmake
+*.cmake.state
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.db
+ipch/
+.vs/  # VS2022缓存目录
+
+# 3. Qt相关文件
+*.moc
+*.ui.h
+*.qrc.cpp
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.qm
+.qmake.stash
+.qmake.cache
+# Qt编译产物
+*.exe
+*.dll
+*.lib
+*.pdb
+# Qt平台插件（你手动复制的platforms文件夹）
+bin/platforms/
+
+# 4. 第三方库（若3rdparty是源码引入，无需忽略；若含编译产物则忽略）
+# 若yaml-cpp/ElaWidgetTools是源码（未编译），则保留3rdparty/；若含build文件夹，添加：
+3rdparty/**/build/
+3rdparty/**/bin/
+3rdparty/**/lib/
+
+# 5. 资源文件（assets已通过CopyAssets复制，本地原文件需提交，无需忽略）
+# 但忽略assets下的临时文件（如编辑器缓存）
+assets/*.tmp
+assets/*~
+
+# 6. 系统/编辑器缓存
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.log
+
+# 7. CMake编译命令导出文件（可选忽略，若需共享给IDE则保留）
+compile_commands.json
