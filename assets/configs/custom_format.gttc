@@ -1,0 +1,19 @@
+[GTTC_Radar_Config]
+Version=2.0
+Author=Prism Team
+Description=Custom radar configuration format
+
+[Signal]
+CarrierFreq=9.8
+Bandwidth=100
+Modulation=LFM
+
+[Target]
+Velocity=250
+RCS=10.5
+Elevation=30
+
+[Simulation]
+Duration=60
+TimeStep=0.001
+OutputRate=100

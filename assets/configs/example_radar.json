@@ -1,0 +1,18 @@
+{
+  "radar": {
+    "type": "Phased Array",
+    "frequency": 10.5,
+    "range": 50000,
+    "azimuth": 45.0
+  },
+  "processing": {
+    "algorithm": "FFT",
+    "windowSize": 1024,
+    "overlapRatio": 0.5
+  },
+  "output": {
+    "format": "Binary",
+    "path": "./output/radar_data.bin",
+    "enableLogging": true
+  }
+}
