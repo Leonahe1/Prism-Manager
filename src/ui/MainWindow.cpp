@@ -1,272 +1,534 @@
 #include "MainWindow.h"
 #include "ProjectManager.h"
-#include "ProcessRunner.h"
+#include "HomePage.h"
+#include "BasePage.h"
+#include "ConfigPage.h"
+#include "ProcessPage.h"
 
-// 标准 Qt 组件（用作占位符）
-#include <QTreeView>
-#include <QTabWidget>
-#include <QTextEdit>
-#include <QSplitter>
-#include <QMenuBar>
-#include <QToolBar>
-#include <QStatusBar>
-#include <QStandardItemModel>
+// ElaWidgetTools 组件
+#include "ElaContentDialog.h"
+#include "ElaDockWidget.h"
+#include "ElaLog.h"
+#include "ElaMenu.h"
+#include "ElaMenuBar.h"
+#include "ElaStatusBar.h"
+#include "ElaText.h"
+#include "ElaPlainTextEdit.h"
+#include "ElaTheme.h"
+#include "ElaToolBar.h"
+#include "ElaToolButton.h"
+#include "ElaMessageBar.h"
+
+// Qt 组件
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QFileDialog>
 #include <QMessageBox>
-#include <QVBoxLayout>
+#include <QProcess>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QUuid>
 #include <QDebug>
 
-// TODO: 替换为 ElaWidgetTools 组件
-// #include "ElaWindow.h"
-// #include "ElaTreeView.h"
-// #include "ElaTabWidget.h"
-// #include "ElaTextEdit.h"
-
-namespace Prism {
-
-MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent)
-    , m_mainWindow(nullptr)
-    , m_logVisible(true)
-    , m_projectManager(std::make_unique<ProjectManager>(this))
+namespace Prism
 {
-    setupUI();
-    setupMenuBar();
-    setupToolBar();
-    setupConnections();
+    MainWindow::MainWindow(QWidget* parent)
+        : ElaWindow(parent)
+          , m_projectManager(std::make_unique<ProjectManager>(this))
+    {
+        // 初始化窗口
+        initWindow();
 
-    // 设置窗口属性
-    setWindowTitle("Prism - Configuration Integration Environment");
-    resize(1400, 900);
+        // 边缘布局（菜单栏/工具栏/停靠窗口/状态栏）
+        initEdgeLayout();
 
-    statusBar()->showMessage("Ready", 3000);
-}
+        // 中心内容（页面注册）
+        initContent();
 
-MainWindow::~MainWindow() = default;
+        // 拦截默认关闭事件
+        _closeDialog = new ElaContentDialog(this);
+        _closeDialog->setWindowTitle("退出确认");
+        _closeDialog->setLeftButtonText("取消");
+        _closeDialog->setMiddleButtonText("最小化");
+        _closeDialog->setRightButtonText("退出");
+        connect(_closeDialog, &ElaContentDialog::rightButtonClicked, this, &MainWindow::closeWindow);
+        connect(_closeDialog, &ElaContentDialog::middleButtonClicked, this, [=]() {
+            _closeDialog->close();
+            showMinimized();
+        });
+        this->setIsDefaultClosed(false);
+        connect(this, &MainWindow::closeButtonClicked, this, [=]() {
+            _closeDialog->exec();
+        });
 
-void MainWindow::setupUI() {
-    // 创建中心部件
-    QWidget* centralWidget = new QWidget(this);
-    QVBoxLayout* mainLayout = new QVBoxLayout(centralWidget);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
+        // 初始化成功提示
+        ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功", "Prism 初始化完成", 2000);
+    }
 
-    // 主分割器（左右）
-    m_mainSplitter = new QSplitter(Qt::Horizontal, this);
+    MainWindow::~MainWindow() = default;
 
-    // 左侧：项目树
-    m_projectTreeView = reinterpret_cast<ElaTreeView*>(new QTreeView(this));
-    m_projectTreeModel = new QStandardItemModel(this);
-    m_projectTreeModel->setHorizontalHeaderLabels({"Projects"});
-    reinterpret_cast<QTreeView*>(m_projectTreeView)->setModel(m_projectTreeModel);
-    reinterpret_cast<QTreeView*>(m_projectTreeView)->setMinimumWidth(200);
-    reinterpret_cast<QTreeView*>(m_projectTreeView)->setMaximumWidth(400);
+    void MainWindow::initWindow()
+    {
+        setFocusPolicy(Qt::StrongFocus);
 
-    // 垂直分割器（中间编辑区 + 底部日志）
-    m_verticalSplitter = new QSplitter(Qt::Vertical, this);
+        // 窗口基础属性
+        setWindowIcon(QIcon(":/Resource/Image/icon.png"));
+        resize(1400, 900);
+        setWindowTitle("Prism - 仿真配置集成环境");
 
-    // 中间：标签页编辑器
-    m_tabWidget = reinterpret_cast<ElaTabWidget*>(new QTabWidget(this));
-    reinterpret_cast<QTabWidget*>(m_tabWidget)->setTabsClosable(true);
-    reinterpret_cast<QTabWidget*>(m_tabWidget)->setMovable(true);
+        // 用户信息卡片（左下角）
+        // setUserInfoCardPixmap(QPixmap(":/Resource/Image/avatar.png"));
+        setUserInfoCardTitle("Prism Manager");
+        setUserInfoCardSubTitle("v0.0.1 - 国腾天创");
 
-    // 底部：日志输出
-    m_logOutput = reinterpret_cast<ElaTextEdit*>(new QTextEdit(this));
-    reinterpret_cast<QTextEdit*>(m_logOutput)->setReadOnly(true);
-    reinterpret_cast<QTextEdit*>(m_logOutput)->setMaximumHeight(250);
-    reinterpret_cast<QTextEdit*>(m_logOutput)->setStyleSheet(
-        "QTextEdit { background-color: #1E1E1E; color: #D4D4D4; font-family: 'Consolas', monospace; }"
-    );
+        // 可选：设置默认页面
+        ElaText* centralStack = new ElaText("欢迎使用 Prism 仿真配置集成环境", this);
+        centralStack->setFocusPolicy(Qt::StrongFocus);
+        centralStack->setTextPixelSize(28);
+        centralStack->setAlignment(Qt::AlignCenter);
+        addCentralWidget(centralStack);
 
-    // 组装垂直分割器
-    m_verticalSplitter->addWidget(reinterpret_cast<QTabWidget*>(m_tabWidget));
-    m_verticalSplitter->addWidget(reinterpret_cast<QTextEdit*>(m_logOutput));
-    m_verticalSplitter->setStretchFactor(0, 3);
-    m_verticalSplitter->setStretchFactor(1, 1);
+        // 自定义 AppBar 右键菜单
+        ElaMenu* appBarMenu = new ElaMenu(this);
+        appBarMenu->setMenuItemHeight(27);
 
-    // 组装主分割器
-    m_mainSplitter->addWidget(reinterpret_cast<QTreeView*>(m_projectTreeView));
-    m_mainSplitter->addWidget(m_verticalSplitter);
-    m_mainSplitter->setStretchFactor(0, 1);
-    m_mainSplitter->setStretchFactor(1, 4);
+        // 主题切换
+        connect(appBarMenu->addElaIconAction(ElaIconType::MoonStars, "切换主题"),
+                &QAction::triggered, this, [=]() {
+            eTheme->setThemeMode(eTheme->getThemeMode() == ElaThemeType::Light
+                                 ? ElaThemeType::Dark : ElaThemeType::Light);
+        });
 
-    mainLayout->addWidget(m_mainSplitter);
-    setCentralWidget(centralWidget);
+        // 设置菜单
+        connect(appBarMenu->addElaIconAction(ElaIconType::GearComplex, "设置"),
+                &QAction::triggered, this, [=]() {
+            navigation(_settingKey);
+        });
 
-    appendLog("Prism Manager initialized.", false);
-}
+        setCustomMenu(appBarMenu);
+    }
 
-void MainWindow::setupMenuBar() {
-    // 文件菜单
-    QMenu* fileMenu = menuBar()->addMenu("File");
-    fileMenu->addAction("New Project", this, &MainWindow::onNewProject, QKeySequence::New);
-    fileMenu->addAction("Open Config", this, &MainWindow::onOpenConfig, QKeySequence::Open);
-    fileMenu->addSeparator();
-    fileMenu->addAction("Exit", this, &QMainWindow::close, QKeySequence::Quit);
+    void MainWindow::initEdgeLayout()
+    {
+        // ========================================
+        // 菜单栏 (ElaMenuBar)
+        // ========================================
+        _menuBar = new ElaMenuBar(this);
+        _menuBar->setFixedHeight(30);
 
-    // 项目菜单
-    QMenu* projectMenu = menuBar()->addMenu("Project");
-    projectMenu->addAction("Run", this, &MainWindow::onRunProject, QKeySequence("F5"));
-    projectMenu->addAction("Stop", this, &MainWindow::onStopProject, QKeySequence("Shift+F5"));
+        // 创建自定义容器（嵌入到 AppBar 中间区域）
+        QWidget* customWidget = new QWidget(this);
+        customWidget->setFixedWidth(400);
+        QVBoxLayout* customLayout = new QVBoxLayout(customWidget);
+        customLayout->setContentsMargins(0, 0, 0, 0);
+        customLayout->addWidget(_menuBar);
+        customLayout->addStretch();
+        this->setCustomWidget(ElaAppBarType::MiddleArea, customWidget);
 
-    // 帮助菜单
-    QMenu* helpMenu = menuBar()->addMenu("Help");
-    helpMenu->addAction("About", this, &MainWindow::onAbout);
-}
+        // ========================================
+        // 文件菜单
+        // ========================================
+        ElaMenu* fileMenu = _menuBar->addMenu(ElaIconType::Folder, "文件(&F)");
+        fileMenu->setMenuItemHeight(27);
 
-void MainWindow::setupToolBar() {
-    QToolBar* toolbar = addToolBar("Main Toolbar");
-    toolbar->addAction("New Project", this, &MainWindow::onNewProject);
-    toolbar->addAction("Open Config", this, &MainWindow::onOpenConfig);
-    toolbar->addSeparator();
-    toolbar->addAction("Run (F5)", this, &MainWindow::onRunProject);
-    toolbar->addAction("Stop", this, &MainWindow::onStopProject);
-}
+        QAction* newProjectAction = fileMenu->addElaIconAction(ElaIconType::FilePlus, "新建项目\tCtrl+N");
+        newProjectAction->setShortcut(QKeySequence::New);
+        connect(newProjectAction, &QAction::triggered, this, &MainWindow::onNewProject);
 
-void MainWindow::setupConnections() {
-    // 项目树选择事件
-    connect(reinterpret_cast<QTreeView*>(m_projectTreeView)->selectionModel(),
-            &QItemSelectionModel::currentChanged,
-            this, [this](const QModelIndex& current, const QModelIndex&) {
-        if (current.isValid()) {
-            QString projectName = m_projectTreeModel->itemFromIndex(current)->text();
-            onProjectSelected(projectName);
+        QAction* openProjectAction = fileMenu->addElaIconAction(ElaIconType::FolderOpen, "打开项目\tCtrl+O");
+        openProjectAction->setShortcut(QKeySequence::Open);
+        connect(openProjectAction, &QAction::triggered, this, &MainWindow::onOpenProject);
+
+        // TODO: 添加最近项目子菜单
+        // ElaMenu* recentMenu = fileMenu->addMenu(ElaIconType::Clock, "最近项目");
+
+        fileMenu->addSeparator();
+
+        QAction* saveConfigAction = fileMenu->addElaIconAction(ElaIconType::FloppyDisk, "保存配置\tCtrl+S");
+        saveConfigAction->setShortcut(QKeySequence::Save);
+        connect(saveConfigAction, &QAction::triggered, this, &MainWindow::onSaveConfig);
+
+        QAction* closeProjectAction = fileMenu->addElaIconAction(ElaIconType::Xmark, "关闭当前项目\tCtrl+W");
+        closeProjectAction->setShortcut(QKeySequence::Close);
+        connect(closeProjectAction, &QAction::triggered, this, &MainWindow::onCloseCurrentProject);
+
+        fileMenu->addSeparator();
+
+        QAction* exitAction = fileMenu->addElaIconAction(ElaIconType::ArrowRightFromBracket, "退出\tCtrl+Q");
+        exitAction->setShortcut(QKeySequence::Quit);
+        connect(exitAction, &QAction::triggered, this, &MainWindow::onExit);
+
+        // ========================================
+        // 项目菜单
+        // ========================================
+        ElaMenu* projectMenu = _menuBar->addMenu(ElaIconType::Rocket, "项目(&P)");
+        projectMenu->setMenuItemHeight(27);
+
+        QAction* projectSettingsAction = projectMenu->addElaIconAction(ElaIconType::GearComplex, "项目设置");
+        connect(projectSettingsAction, &QAction::triggered, this, &MainWindow::onProjectSettings);
+
+        QAction* addConfigAction = projectMenu->addElaIconAction(ElaIconType::FilePlus, "添加配置文件");
+        connect(addConfigAction, &QAction::triggered, this, &MainWindow::onAddConfigFile);
+
+        projectMenu->addSeparator();
+
+        QAction* refreshAction = projectMenu->addElaIconAction(ElaIconType::ArrowRotateRight, "刷新项目\tF5");
+        refreshAction->setShortcut(Qt::Key_F5);
+        connect(refreshAction, &QAction::triggered, this, &MainWindow::onRefreshProject);
+
+        QAction* openExplorerAction = projectMenu->addElaIconAction(ElaIconType::FolderOpen, "在资源管理器中打开");
+        connect(openExplorerAction, &QAction::triggered, this, &MainWindow::onOpenInExplorer);
+
+        // ========================================
+        // 帮助菜单
+        // ========================================
+        ElaMenu* helpMenu = _menuBar->addMenu(ElaIconType::CircleInfo, "帮助(&H)");
+        helpMenu->setMenuItemHeight(27);
+        helpMenu->addElaIconAction(ElaIconType::BookOpen, "文档");
+        helpMenu->addElaIconAction(ElaIconType::User, "关于");
+
+        // ========================================
+        // 工具栏 (ElaToolBar)
+        // ========================================
+        ElaToolBar* toolBar = new ElaToolBar("主工具栏", this);
+        toolBar->setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+        toolBar->setToolBarSpacing(3);
+        toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        toolBar->setIconSize(QSize(25, 25));
+
+        ElaToolButton* openButton = new ElaToolButton(this);
+        openButton->setElaIcon(ElaIconType::FolderOpen);
+        openButton->setToolTip("打开项目 (Ctrl+O)");
+        connect(openButton, &ElaToolButton::clicked, this, &MainWindow::onOpenProject);
+        toolBar->addWidget(openButton);
+
+        toolBar->addSeparator();
+
+        ElaToolButton* runButton = new ElaToolButton(this);
+        runButton->setElaIcon(ElaIconType::Play);
+        runButton->setToolTip("运行 (F5)");
+        runButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        toolBar->addWidget(runButton);
+
+        ElaToolButton* stopButton = new ElaToolButton(this);
+        stopButton->setElaIcon(ElaIconType::Stop);
+        stopButton->setToolTip("停止 (Shift+F5)");
+        toolBar->addWidget(stopButton);
+
+        this->addToolBar(Qt::TopToolBarArea, toolBar);
+
+        // ========================================
+        // 停靠窗口 (ElaDockWidget) - 日志输出
+        // ========================================
+        ElaDockWidget* logDockWidget = new ElaDockWidget("日志输出", this);
+
+        // 创建日志文本编辑器
+        ElaPlainTextEdit* logTextEdit = new ElaPlainTextEdit(this);
+        logTextEdit->setReadOnly(true);
+        logTextEdit->setStyleSheet(
+            "ElaPlainTextEdit { "
+            "background-color: #1E1E1E; "
+            "color: #D4D4D4; "
+            "font-family: 'Consolas', 'Courier New', monospace; "
+            "font-size: 11pt; "
+            "}"
+        );
+        logTextEdit->appendPlainText("[INFO] Prism 管理器已初始化");
+        logTextEdit->appendPlainText("[INFO] 等待用户操作...");
+
+        logDockWidget->setWidget(logTextEdit);
+        this->addDockWidget(Qt::BottomDockWidgetArea, logDockWidget);
+        resizeDocks({logDockWidget}, {250}, Qt::Vertical);
+
+        // ========================================
+        // 状态栏 (ElaStatusBar)
+        // ========================================
+        _statusBar = new ElaStatusBar(this);
+        ElaText* statusText = new ElaText("就绪 ", this);
+        statusText->setTextPixelSize(15);
+        _statusBar->addWidget(statusText);
+        this->setStatusBar(_statusBar);
+    }
+
+    void MainWindow::initContent()
+    {
+        // ========================================
+        // 创建通用页面实例
+        // ========================================
+        _homePage = new HomePage(this);
+        _settingPage = new BasePage(this);
+
+        // ========================================
+        // 注册顶级导航节点
+        // ========================================
+        addPageNode("首页", _homePage, ElaIconType::House);
+
+        // ========================================
+        // 项目管理展开器节点（顶级）
+        // ========================================
+        // 预留空间：后续通过 addProject() 动态添加项目子节点
+        // 每个项目将作为一个展开器节点，包含"配置文件"和"进程监控"页面
+        addExpanderNode("项目管理", _projectManagementKey, ElaIconType::FolderTree);
+
+        // TODO: 在项目管理下动态添加项目
+        // 示例结构：
+        // └── 项目管理 (展开器)
+        //     ├── [项目A] (展开器)
+        //     │   ├── 配置文件
+        //     │   └── 进程监控
+        //     └── [项目B] (展开器)
+        //         ├── 配置文件
+        //         └── 进程监控
+
+        // ========================================
+        // 底部固定节点
+        // ========================================
+        addFooterNode("设置", _settingPage, _settingKey, 0, ElaIconType::GearComplex);
+
+        // ========================================
+        // 连接导航信号
+        // ========================================
+        connect(this, &ElaWindow::navigationNodeClicked, this,
+                [=](ElaNavigationType::NavigationNodeType nodeType, QString nodeKey) {
+            // 处理特殊节点点击
+            if (nodeKey == _settingKey) {
+                qDebug() << "设置页面被点击";
+            }
+        });
+
+        // 用户信息卡片点击 -> 跳转到首页
+        connect(this, &MainWindow::userInfoCardClicked, this, [=]() {
+            this->navigation(_homePage->property("ElaPageKey").toString());
+        });
+    }
+
+    // ========================================
+    // 项目管理公共接口实现
+    // ========================================
+    QString MainWindow::addProject(const QString& projectPath)
+    {
+        // TODO: 实现项目添加逻辑
+        // 1. 验证路径有效性
+        // 2. 生成唯一 ID (UUID)
+        // 3. 创建 ProjectInfo 结构
+        // 4. 在导航树中添加项目展开器节点
+        // 5. 创建配置页面和进程页面
+        // 6. 注册到内部数据结构
+
+        QString projectId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        qDebug() << "添加项目:" << projectPath << "ID:" << projectId;
+
+        // 示例：创建项目信息
+        ProjectInfo info;
+        info.id = projectId;
+        info.name = projectPath.section('/', -1); // 提取目录名
+        info.rootPath = projectPath;
+        info.lastOpened = QDateTime::currentDateTime();
+        info.isActive = false;
+        QStringList configFiles;
+        QDir projectDir(projectPath);
+        QStringList nameFilters = {"*.ini", "*.json", "*.yaml", "*.yml", "*.conf"};
+        QFileInfoList fileInfoList = projectDir.entryInfoList(nameFilters, QDir::Files);
+
+        for (const QFileInfo& fileInfo : fileInfoList) {
+            configFiles.append(fileInfo.absoluteFilePath());
         }
-    });
 
-    // 项目管理器信号
-    connect(m_projectManager.get(), &ProjectManager::projectCreated,
-            this, [this](const QString& name) {
-        appendLog(QString("Project created: %1").arg(name), false);
-        updateProjectTree();
-    });
+        info.configFiles = configFiles;
+        _openedProjects[projectId] = info;
 
-    connect(m_projectManager.get(), &ProjectManager::projectStateChanged,
-            this, [this](const QString& name, bool isRunning) {
-        QString status = isRunning ? "started" : "stopped";
-        appendLog(QString("Project %1 %2").arg(name).arg(status), false);
-        updateProjectTree();
-    });
-}
+        // TODO: 动态添加到导航树
+        // QString projectExpanderKey;
+        // addExpanderNode(info.name, projectExpanderKey, _projectManagementKey, ElaIconType::Folder);
+        // addPageNode("配置文件", configPage, projectExpanderKey, ...);
+        // addPageNode("进程监控", processPage, projectExpanderKey, ...);
+        // 创建项目专属页面
+        ConfigPage* configPage = new ConfigPage(this);
+        configPage->setProjectName(info.name);
+        configPage->loadConfigFiles(info.configFiles); // 从 Project 中获取
 
-void MainWindow::onProjectSelected(const QString& projectName) {
-    m_currentProject = projectName;
-    statusBar()->showMessage(QString("Selected project: %1").arg(projectName));
-    appendLog(QString("Selected project: %1").arg(projectName), false);
-}
+        ProcessPage* processPage = new ProcessPage(this);
+        processPage->setProjectName(info.name);
 
-void MainWindow::onRunProject() {
-    if (m_currentProject.isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please select a project first.");
-        return;
+        // 注册到导航树
+        QString projectExpanderKey;
+        addExpanderNode(info.name, projectExpanderKey, _projectManagementKey, ElaIconType::Folder);
+        addPageNode("配置文件", configPage, projectExpanderKey, 0, ElaIconType::FileCode);
+        addPageNode("进程监控", processPage, projectExpanderKey, ElaIconType::Terminal);
+
+        // 保存引用
+        _projectConfigPages[info.name] = configPage;
+        _projectProcessPages[info.name] = processPage;
+        _projectExpanderKeys[projectId] = projectExpanderKey;
+        ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
+                               QString("项目已添加: %1").arg(info.name), 2000);
+
+        return projectId;
     }
 
-    // 示例：运行一个简单的命令（实际应从配置中读取）
-    QString program = "cmd.exe";
-    QStringList args = {"/c", "echo", "Running project " + m_currentProject};
+    void MainWindow::closeProject(const QString& projectId)
+    {
+        // TODO: 实现项目关闭逻辑
+        // 1. 验证项目 ID 存在
+        // 2. 从导航树移除节点
+        // 3. 释放页面资源
+        // 4. 从内部数据结构移除
 
-    bool success = m_projectManager->runProject(m_currentProject, program, args);
-    if (success) {
-        // 连接进程输出
-        auto runner = m_projectManager->getProcessRunner(m_currentProject);
-        if (runner) {
-            connect(runner.get(), &ProcessRunner::standardOutput,
-                    this, &MainWindow::onProcessOutput);
-            connect(runner.get(), &ProcessRunner::standardError,
-                    this, &MainWindow::onProcessError);
-        }
-    } else {
-        QMessageBox::critical(this, "Error", "Failed to start project.");
-    }
-}
-
-void MainWindow::onStopProject() {
-    if (m_currentProject.isEmpty()) {
-        QMessageBox::warning(this, "Warning", "Please select a project first.");
-        return;
-    }
-
-    m_projectManager->stopProject(m_currentProject);
-}
-
-void MainWindow::onOpenConfig() {
-    QString filePath = QFileDialog::getOpenFileName(
-        this,
-        "Open Configuration File",
-        QString(),
-        "Config Files (*.ini *.json *.yaml *.yml *.conf *.cfg);;All Files (*)"
-    );
-
-    if (!filePath.isEmpty()) {
-        appendLog(QString("Opened config: %1").arg(filePath), false);
-        // TODO: 在编辑器中打开配置文件
-    }
-}
-
-void MainWindow::onNewProject() {
-    // 简化演示：直接弹出文件选择对话框
-    QString configPath = QFileDialog::getOpenFileName(
-        this,
-        "Select Configuration File for New Project",
-        QString(),
-        "Config Files (*.ini *.json *.yaml *.yml);;All Files (*)"
-    );
-
-    if (!configPath.isEmpty()) {
-        QString projectName = QFileInfo(configPath).baseName();
-        bool success = m_projectManager->createProject(projectName, configPath);
-        if (success) {
-            m_projectManager->loadProject(projectName);
-        } else {
-            QMessageBox::critical(this, "Error", "Failed to create project.");
-        }
-    }
-}
-
-void MainWindow::onAbout() {
-    QMessageBox::about(this, "About Prism",
-        "Prism - Configuration Integration Environment\n\n"
-        "Version: 1.0.0\n"
-        "A modern tool for radar simulation configuration management.\n\n"
-        "Built with C++17, Qt 5.14+, and ElaWidgetTools.");
-}
-
-void MainWindow::onProcessOutput(const QString& output) {
-    appendLog(output, false);
-}
-
-void MainWindow::onProcessError(const QString& error) {
-    appendLog(error, true);
-}
-
-void MainWindow::appendLog(const QString& text, bool isError) {
-    QString color = isError ? "#FF6B6B" : "#D4D4D4";
-    QString html = QString("<span style='color: %1;'>%2</span>")
-                       .arg(color)
-                       .arg(text.toHtmlEscaped());
-
-    reinterpret_cast<QTextEdit*>(m_logOutput)->append(html);
-}
-
-void MainWindow::updateProjectTree() {
-    m_projectTreeModel->clear();
-    m_projectTreeModel->setHorizontalHeaderLabels({"Projects"});
-
-    QStringList projects = m_projectManager->getAllProjectNames();
-    for (const QString& projectName : projects) {
-        auto* item = new QStandardItem(projectName);
-
-        // 获取运行状态
-        auto* project = m_projectManager->getProject(projectName);
-        if (project && project->isRunning) {
-            item->setIcon(QIcon(":/icons/running.png")); // TODO: 添加实际图标
-            item->setForeground(QColor(0, 200, 83)); // Green
-        } else {
-            item->setIcon(QIcon(":/icons/stopped.png")); // TODO: 添加实际图标
-            item->setForeground(QColor(150, 150, 150)); // Gray
+        if (!_openedProjects.contains(projectId)) {
+            qWarning() << "项目不存在:" << projectId;
+            return;
         }
 
-        m_projectTreeModel->appendRow(item);
+        QString projectName = _openedProjects[projectId].name;
+        _openedProjects.remove(projectId);
+        _projectExpanderKeys.remove(projectId);
+
+        // TODO: 移除导航节点
+        // removeNavigationNode(_projectExpanderKeys[projectId]);
+
+        // 释放页面
+        if (_projectConfigPages.contains(projectId)) {
+            _projectConfigPages[projectId]->deleteLater();
+            _projectConfigPages.remove(projectId);
+        }
+        if (_projectProcessPages.contains(projectId)) {
+            _projectProcessPages[projectId]->deleteLater();
+            _projectProcessPages.remove(projectId);
+        }
+
+        ElaMessageBar::information(ElaMessageBarType::BottomRight, "信息",
+                                   QString("项目已关闭: %1").arg(projectName), 2000);
     }
-}
+
+    void MainWindow::setActiveProject(const QString& projectId)
+    {
+        // TODO: 实现切换激活项目
+        // 1. 验证项目 ID 存在
+        // 2. 取消之前的激活状态
+        // 3. 设置新的激活状态
+        // 4. 更新状态栏显示
+
+        if (!_openedProjects.contains(projectId)) {
+            qWarning() << "项目不存在:" << projectId;
+            return;
+        }
+
+        // 取消之前的激活状态
+        for (auto& project : _openedProjects) {
+            project.isActive = false;
+        }
+
+        // 激活新项目
+        _openedProjects[projectId].isActive = true;
+        _currentProjectId = projectId;
+
+        qDebug() << "激活项目:" << _openedProjects[projectId].name;
+    }
+
+    // ========================================
+    // 菜单栏槽函数实现
+    // ========================================
+    void MainWindow::onNewProject()
+    {
+        // TODO: 打开新建项目对话框
+        ElaMessageBar::information(ElaMessageBarType::BottomRight, "提示",
+                                   "新建项目功能即将推出", 2000);
+    }
+
+    void MainWindow::onOpenProject()
+    {
+        QString projectPath = QFileDialog::getExistingDirectory(
+            this,
+            "选择项目目录",
+            QDir::homePath(),
+            QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+        );
+
+        if (!projectPath.isEmpty()) {
+            addProject(projectPath);
+        }
+    }
+
+    void MainWindow::onSaveConfig()
+    {
+        if (_currentProjectId.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                                   "未选择项目", 1500);
+            return;
+        }
+
+        // TODO: 保存当前项目配置
+        ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
+                               "配置已保存", 1500);
+    }
+
+    void MainWindow::onCloseCurrentProject()
+    {
+        if (_currentProjectId.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                                   "未选择项目", 1500);
+            return;
+        }
+
+        closeProject(_currentProjectId);
+        _currentProjectId.clear();
+    }
+
+    void MainWindow::onExit()
+    {
+        // 触发关闭确认对话框
+        _closeDialog->exec();
+    }
+
+    void MainWindow::onProjectSettings()
+    {
+        if (_currentProjectId.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                                   "未选择项目", 1500);
+            return;
+        }
+
+        // TODO: 打开项目设置对话框
+        ElaMessageBar::information(ElaMessageBarType::BottomRight, "提示",
+                                   "项目设置功能即将推出", 2000);
+    }
+
+    void MainWindow::onAddConfigFile()
+    {
+        if (_currentProjectId.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                                   "未选择项目", 1500);
+            return;
+        }
+
+        // TODO: 打开添加配置文件对话框
+        ElaMessageBar::information(ElaMessageBarType::BottomRight, "提示",
+                                   "添加配置文件功能即将推出", 2000);
+    }
+
+    void MainWindow::onRefreshProject()
+    {
+        if (_currentProjectId.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                                   "未选择项目", 1500);
+            return;
+        }
+
+        // TODO: 刷新项目文件列表
+        ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
+                               "项目已刷新", 1500);
+    }
+
+    void MainWindow::onOpenInExplorer()
+    {
+        if (_currentProjectId.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                                   "未选择项目", 1500);
+            return;
+        }
+
+        QString projectPath = _openedProjects[_currentProjectId].rootPath;
+        QDesktopServices::openUrl(QUrl::fromLocalFile(projectPath));
+    }
 
 } // namespace Prism
