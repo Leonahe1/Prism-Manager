@@ -1,44 +1,41 @@
 #include "ui/MainWindow.h"
 #include <QApplication>
-#include <QStyleFactory>
 #include <QDebug>
-
-#include "ElaWidgetTools/ElaApplication.h"
-
-// TODO: 当集成 ElaWidgetTools 后，使用 ElaApplication
-// #include "ElaApplication.h"
+#include "ElaApplication.h"
 
 /**
  * @brief Prism 主入口
  *
  * 初始化流程：
- * 1. 启用高分屏支持
- * 2. 创建 QApplication（或 ElaApplication）
- * 3. 设置应用信息
- * 4. 加载主题和样式
+ * 1. 启用高分屏支持（必须在 QApplication 创建之前）
+ * 2. 创建 QApplication
+ * 3. 初始化 ElaApplication
+ * 4. 设置应用信息
  * 5. 显示主窗口
  */
 int main(int argc, char* argv[]) {
     // ========================================
-    // 高分屏支持（Qt 5.14+）
+    // 高分屏支持（必须在 QApplication 创建前配置）
     // ========================================
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    QGuiApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
-    QApplication::setHighDpiScaleFactorRoundingPolicy(
+    QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+#else
+    // Qt 5.14 以下版本，手动设置缩放比例
+    qputenv("QT_SCALE_FACTOR", "1.5");
 #endif
-
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 6, 0))
-    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 #endif
 
     // ========================================
     // 创建应用程序实例
     // ========================================
-    // TODO: 替换为 ElaApplication
-    // ElaApplication app(argc, argv);
     QApplication app(argc, argv);
-    //eApp->init();
+
+    // 关键：初始化 ElaApplication 单例（必须在 QApplication 创建后立即调用）
+    eApp->init();
     // ========================================
     // 设置应用程序信息
     // ========================================
@@ -49,36 +46,12 @@ int main(int argc, char* argv[]) {
     app.setApplicationDisplayName("Prism - Configuration Integration Environment");
 
     // ========================================
-    // 设置样式（可选：Fusion 风格作为后备）
-    // ========================================
-    // ElaWidgetTools 会自动应用 Fluent Design
-    // 这里先使用 Fusion 作为占位符
-    app.setStyle(QStyleFactory::create("Fusion"));
-
-    // 设置调色板（深色主题）
-    QPalette darkPalette;
-    darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::WindowText, Qt::white);
-    darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-    darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-    darkPalette.setColor(QPalette::Text, Qt::white);
-    darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::ButtonText, Qt::white);
-    darkPalette.setColor(QPalette::BrightText, Qt::red);
-    darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-    darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-    app.setPalette(darkPalette);
-
-    // ========================================
     // 日志输出
     // ========================================
     qDebug() << "========================================";
-    qDebug() << "Prism Manager Starting...";
-    qDebug() << "Version:" << app.applicationVersion();
-    qDebug() << "Qt Version:" << qVersion();
+    qDebug() << "Prism 管理器启动中...";
+    qDebug() << "版本:" << app.applicationVersion();
+    qDebug() << "Qt 版本:" << qVersion();
     qDebug() << "========================================";
 
     // ========================================
@@ -92,6 +65,6 @@ int main(int argc, char* argv[]) {
     // ========================================
     int ret = app.exec();
 
-    qDebug() << "Prism Manager Exiting with code:" << ret;
+    qDebug() << "Prism 管理器退出，返回码:" << ret;
     return ret;
 }

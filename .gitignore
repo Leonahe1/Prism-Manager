@@ -1,11 +1,20 @@
 # claude项目配置文件
-.cluade/
+/.claude/
 CLAUDE.md
 # 1. 编译产物目录（CMake生成的build文件夹）
 /build/
+# Debug   build.bat专用构建目录
+/build-debug/    
+# Release build.bat专用构建目录
+/build-release/  
+# CLion Debug   专用构建目录
+/cmake-build-debug/
+# CLion Release 专用构建目录    
+/cmake-build-release/  
 /bin/
 /lib/
-/Install/  # 安装目录（对应CMAKE_INSTALL_PREFIX）
+# 安装目录（对应CMAKE_INSTALL_PREFIX）
+/Install/  
 
 # 2. CMake临时文件
 CMakeCache.txt
@@ -21,7 +30,8 @@ Makefile
 *.suo
 *.db
 ipch/
-.vs/  # VS2022缓存目录
+# VS2022缓存目录
+.vs/  
 
 # 3. Qt相关文件
 *.moc
@@ -38,7 +48,7 @@ qrc_*.cpp
 *.dll
 *.lib
 *.pdb
-# Qt平台插件（你手动复制的platforms文件夹）
+# Qt平台插件
 bin/platforms/
 
 # 4. 第三方库（若3rdparty是源码引入，无需忽略；若含编译产物则忽略）
@@ -62,3 +72,7 @@ Thumbs.db
 
 # 7. CMake编译命令导出文件（可选忽略，若需共享给IDE则保留）
 compile_commands.json
+
+# 8. 其他不需要纳入版本控制的文件
+开发环境配置.txt
+ElaWidgetTools_Usage.md
