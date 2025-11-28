@@ -106,10 +106,11 @@ private:
     // ========================================
     // 多项目管理数据结构
     // ========================================
-    QMap<QString, ProjectInfo> _openedProjects;        // 已打开的项目
+    QMap<QString, ProjectInfo> _openedProjects;        // 已打开的项目 (projectId -> ProjectInfo)
     QMap<QString, QString> _projectExpanderKeys;       // 项目ID -> 展开节点Key
     QMap<QString, BasePage*> _projectConfigPages;      // 项目ID -> 配置页面
     QMap<QString, BasePage*> _projectProcessPages;     // 项目ID -> 进程页面
+    QMap<QString, QString> _pageKeyToProjectId;        // 页面Key -> 项目ID (反向查找)
     QString _currentProjectId;                         // 当前激活的项目ID
 
     // ========================================
@@ -131,15 +132,11 @@ private:
     std::unique_ptr<ProjectManager> m_projectManager;
 
     // ========================================
-    // 辅助方法（预留）
+    // 辅助方法
     // ========================================
-    // TODO: 添加项目持久化方法
-    // void saveProjectsToConfig();
-    // void loadProjectsFromConfig();
-
-    // TODO: 添加最近项目管理
-    // QStringList getRecentProjects();
-    // void updateRecentProjects(const QString& projectId);
+    void saveProjectsToSettings();      // 保存项目列表到 QSettings
+    void loadProjectsFromSettings();    // 从 QSettings 加载项目列表
+    void updateCurrentProjectFromPageKey(const QString& pageKey);  // 根据页面Key更新当前项目
 };
 
 } // namespace Prism
