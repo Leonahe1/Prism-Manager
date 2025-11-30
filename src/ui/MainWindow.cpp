@@ -224,22 +224,27 @@ namespace Prism {
         ElaDockWidget *logDockWidget = new ElaDockWidget("日志输出", this);
 
         // 创建日志文本编辑器
-        ElaPlainTextEdit *logTextEdit = new ElaPlainTextEdit(this);
-        logTextEdit->setReadOnly(true);
-        logTextEdit->setStyleSheet(
+        _logTextEdit = new ElaPlainTextEdit(this);
+        _logTextEdit->setReadOnly(true);
+        _logTextEdit->setStyleSheet(
             "ElaPlainTextEdit { "
-            "background-color: #1E1E1E; "
-            "color: #D4D4D4; "
+            "background-color: #FFFFFF; "
+            "color: #323130; "
             "font-family: 'Consolas', 'Courier New', monospace; "
             "font-size: 11pt; "
+            "border: 1px solid #E1E1E1; "
             "}"
         );
-        logTextEdit->appendPlainText("[INFO] Prism 管理器已初始化");
-        logTextEdit->appendPlainText("[INFO] 等待用户操作...");
-
-        logDockWidget->setWidget(logTextEdit);
+        logDockWidget->setWidget(_logTextEdit);
         this->addDockWidget(Qt::BottomDockWidgetArea, logDockWidget);
         resizeDocks({logDockWidget}, {250}, Qt::Vertical);
+
+        // 连接主题变化信号
+        connect(eTheme, &ElaTheme::themeModeChanged, this, &MainWindow::onThemeChanged);
+
+        // 初始日志
+        appendLog("INFO", "Prism 管理器已初始化");
+        appendLog("INFO", "等待用户操作...");
 
         // ========================================
         // 状态栏 (ElaStatusBar)
@@ -729,4 +734,99 @@ namespace Prism {
             }
         }
     }
+
+    // ========================================
+    // 日志系统
+    // ========================================
+    void MainWindow::appendLog(const QString& level, const QString& message)
+    {
+        if (!_logTextEdit) {
+            return;
+        }
+
+        // 获取当前时间戳
+        QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+
+        // 定义日志级别对应的颜色（深色主题）
+        QMap<QString, QString> darkColors;
+        darkColors["INFO"] = "#61AFEF";      // 蓝色
+        darkColors["SUCCESS"] = "#98C379";   // 绿色
+        darkColors["WARNING"] = "#E5C07B";   // 黄色
+        darkColors["ERROR"] = "#E06C75";     // 红色
+        darkColors["DEBUG"] = "#C678DD";     // 紫色
+        darkColors["PROCESS"] = "#56B6C2";   // 青色
+        darkColors["STDOUT"] = "#ABB2BF";    // 灰白
+        darkColors["STDERR"] = "#E06C75";    // 红色
+
+        // 定义日志级别对应的颜色（浅色主题）
+        QMap<QString, QString> lightColors;
+        lightColors["INFO"] = "#0078D4";     // 蓝色
+        lightColors["SUCCESS"] = "#107C10";  // 绿色
+        lightColors["WARNING"] = "#F7630C";  // 橙色
+        lightColors["ERROR"] = "#D13438";    // 红色
+        lightColors["DEBUG"] = "#8764B8";    // 紫色
+        lightColors["PROCESS"] = "#00979C";  // 青色
+        lightColors["STDOUT"] = "#323130";   // 深灰
+        lightColors["STDERR"] = "#D13438";   // 红色
+
+        // 根据当前主题选择颜色方案
+        bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+        QMap<QString, QString> &colors = isDark ? darkColors : lightColors;
+
+        // 获取颜色
+        QString color = colors.value(level, isDark ? "#D4D4D4" : "#323130");
+
+        // 构建带颜色的日志行
+        QString logLine = QString("<span style='color: %1;'>[%2] [%3] %4</span>")
+                              .arg(color)
+                              .arg(timestamp)
+                              .arg(level)
+                              .arg(message);
+
+        // 追加日志（使用HTML格式）
+        _logTextEdit->appendHtml(logLine);
+
+        // 自动滚动到底部
+        QTextCursor cursor = _logTextEdit->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        _logTextEdit->setTextCursor(cursor);
+    }
+
+    void MainWindow::onThemeChanged(ElaThemeType::ThemeMode mode)
+    {
+        if (!_logTextEdit) {
+            return;
+        }
+
+        // 根据主题更新日志窗口样式
+        bool isDark = (mode == ElaThemeType::Dark);
+
+        if (isDark) {
+            // 深色主题：深色背景 + 浅色文字
+            _logTextEdit->setStyleSheet(
+                "ElaPlainTextEdit { "
+                "background-color: #1E1E1E; "
+                "color: #D4D4D4; "
+                "font-family: 'Consolas', 'Courier New', monospace; "
+                "font-size: 11pt; "
+                "}"
+            );
+        } else {
+            // 浅色主题：浅色背景 + 深色文字
+            _logTextEdit->setStyleSheet(
+                "ElaPlainTextEdit { "
+                "background-color: #FFFFFF; "
+                "color: #323130; "
+                "font-family: 'Consolas', 'Courier New', monospace; "
+                "font-size: 11pt; "
+                "border: 1px solid #E1E1E1; "
+                "}"
+            );
+        }
+
+        // 记录主题切换日志
+        QString themeName = isDark ? "Dark" : "Light";
+        appendLog("DEBUG", QString("主题已切换: %1").arg(themeName));
+    }
+
 } // namespace Prism

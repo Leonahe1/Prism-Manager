@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <memory>
 
+class ElaPlainTextEdit;
 // 前向声明 ElaWidgetTools 类
 class ElaStatusBar;
 class ElaContentDialog;
@@ -86,6 +87,13 @@ public:
      */
     void setActiveProject(const QString& projectId);
 
+    /**
+     * @brief 添加日志消息
+     * @param level 日志级别 (INFO/SUCCESS/WARNING/ERROR/DEBUG/PROCESS/STDOUT/STDERR)
+     * @param message 日志内容
+     */
+    void appendLog(const QString& level, const QString& message);
+
 private slots:
     // ========================================
     // 菜单栏槽函数
@@ -102,6 +110,9 @@ private slots:
     void onAddConfigFile();       // 添加配置文件
     void onRefreshProject();      // 刷新项目
     void onOpenInExplorer();      // 在资源管理器中打开
+
+    // 主题变化响应
+    void onThemeChanged(ElaThemeType::ThemeMode mode);
 
 private:
     // ========================================
@@ -132,6 +143,7 @@ private:
     ElaMenuBar* _menuBar{ nullptr };
     ElaStatusBar* _statusBar{ nullptr };
     ElaContentDialog* _closeDialog{ nullptr };
+    ElaPlainTextEdit* _logTextEdit{ nullptr };  // 日志窗口
 
     // ========================================
     // 业务逻辑
