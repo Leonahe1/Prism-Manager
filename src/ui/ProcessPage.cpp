@@ -116,13 +116,15 @@ void ProcessPage::initUI()
     // 组装到页面中央
     // ========================================
     QWidget* centralWidget = new QWidget(this);
+    centralWidget->setWindowTitle("进程监控");  // 设置标题，避免显示 Page_0
     QVBoxLayout* centerLayout = new QVBoxLayout(centralWidget);
     centerLayout->setContentsMargins(0, 0, 0, 0);
     centerLayout->addWidget(topWidget);
     centerLayout->addWidget(middleWidget, 1); // 日志区域占据主要空间
     centerLayout->addWidget(bottomWidget);
 
-    addCentralWidget(centralWidget);
+    // 禁用垂直拖拽手势和鼠标延迟，避免干扰输入操作
+    addCentralWidget(centralWidget, true, false, 0);
 }
 
 void ProcessPage::setupConnections()

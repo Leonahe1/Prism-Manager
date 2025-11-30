@@ -63,15 +63,22 @@ public:
     /**
      * @brief 添加新项目到导航树
      * @param projectPath 项目根目录路径
+     * @param silent 是否静默模式（不显示消息提示）
      * @return 项目 ID (失败返回空字符串)
      */
-    QString addProject(const QString& projectPath);
+    QString addProject(const QString& projectPath, bool silent = false);
 
     /**
-     * @brief 关闭项目（移除导航节点）
+     * @brief 从列表移除项目（移除导航节点，不删除本地文件）
      * @param projectId 项目 ID
      */
-    void closeProject(const QString& projectId);
+    void removeProject(const QString& projectId);
+
+    /**
+     * @brief 关闭项目（仅取消激活状态，项目仍保留在列表中）
+     * @param projectId 项目 ID
+     */
+    void deactivateProject(const QString& projectId);
 
     /**
      * @brief 切换当前激活项目
@@ -84,10 +91,10 @@ private slots:
     // 菜单栏槽函数
     // ========================================
     // 文件菜单
-    void onNewProject();          // 新建项目 (Ctrl+N)
-    void onOpenProject();         // 打开项目 (Ctrl+O)
-    void onSaveConfig();          // 保存配置 (Ctrl+S)
-    void onCloseCurrentProject(); // 关闭当前项目 (Ctrl+W)
+    void onImportProject();       // 导入项目 (Ctrl+O)
+    void onSaveConfig();          // 保存 (Ctrl+S)
+    void onCloseCurrentProject(); // 关闭当前项目 (Ctrl+W) - 仅取消激活
+    void onRemoveProject();       // 从列表移除
     void onExit();                // 退出 (Ctrl+Q)
 
     // 项目菜单
