@@ -1,4 +1,5 @@
 #include "ConfigPage.h"
+#include "MainWindow.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -634,6 +635,11 @@ void ConfigPage::openConfigFile(const QString& filePath)
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
                              QString("无法打开文件: %1").arg(filePath), 2000);
+
+        // 添加错误日志
+        if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+            mainWin->appendLog("ERROR", QString("无法打开配置文件: %1").arg(filePath));
+        }
         return;
     }
 
@@ -653,8 +659,15 @@ void ConfigPage::openConfigFile(const QString& filePath)
         syncSourceToForm();
     }
 
+    QString fileName = filePath.section('/', -1);
     ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
-                           QString("已打开: %1").arg(filePath.section('/', -1)), 1500);
+                           QString("已打开: %1").arg(fileName), 1500);
+
+    // 添加成功日志
+    if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+        mainWin->appendLog("INFO", QString("打开配置文件: %1 (格式: %2)")
+            .arg(fileName, _currentFormat.toUpper()));
+    }
 
     qDebug() << "打开配置文件:" << filePath << "格式:" << _currentFormat;
 }
@@ -676,6 +689,11 @@ void ConfigPage::saveCurrentConfig()
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
                              QString("无法保存文件: %1").arg(_currentFilePath), 2000);
+
+        // 添加错误日志
+        if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+            mainWin->appendLog("ERROR", QString("无法保存配置文件: %1").arg(_currentFilePath));
+        }
         return;
     }
 
@@ -687,8 +705,14 @@ void ConfigPage::saveCurrentConfig()
     _isModified = false;
     _saveButton->setEnabled(false);
 
+    QString fileName = _currentFilePath.section('/', -1);
     ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
                            "配置文件已保存", 1500);
+
+    // 添加成功日志
+    if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+        mainWin->appendLog("SUCCESS", QString("配置文件已保存: %1").arg(fileName));
+    }
 
     emit configFileSaved(_currentFilePath);
 
@@ -725,6 +749,7 @@ void ConfigPage::validateConfig()
     }
 
     QString content = _configEditor->toPlainText();
+    QString fileName = _currentFilePath.section('/', -1);
 
     if (_currentFormat == "json") {
         QJsonParseError error;
@@ -732,9 +757,18 @@ void ConfigPage::validateConfig()
         if (error.error != QJsonParseError::NoError) {
             ElaMessageBar::error(ElaMessageBarType::BottomRight, "JSON 错误",
                                  error.errorString(), 2000);
+            // 添加错误日志
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("ERROR", QString("JSON 验证失败 (%1): %2")
+                    .arg(fileName, error.errorString()));
+            }
         } else {
             ElaMessageBar::success(ElaMessageBarType::BottomRight, "验证通过",
                                    "JSON 格式正确", 1500);
+            // 添加成功日志
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("SUCCESS", QString("JSON 验证通过: %1").arg(fileName));
+            }
         }
     } else if (_currentFormat == "yaml") {
 #ifdef YAML_CPP_AVAILABLE
@@ -763,9 +797,19 @@ void ConfigPage::validateConfig()
 
             ElaMessageBar::success(ElaMessageBarType::BottomRight, "验证通过",
                                    QString("YAML 格式正确，共 %1 个节点").arg(nodeCount), 2000);
+            // 添加成功日志
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("SUCCESS", QString("YAML 验证通过: %1 (共 %2 个节点)")
+                    .arg(fileName).arg(nodeCount));
+            }
         } catch (const YAML::Exception& e) {
             ElaMessageBar::error(ElaMessageBarType::BottomRight, "YAML 错误",
                                  QString::fromStdString(e.what()), 2000);
+            // 添加错误日志
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("ERROR", QString("YAML 验证失败 (%1): %2")
+                    .arg(fileName, QString::fromStdString(e.what())));
+            }
         }
 #else
         ElaMessageBar::warning(ElaMessageBarType::BottomRight, "提示",
@@ -780,6 +824,11 @@ void ConfigPage::validateConfig()
         }
         ElaMessageBar::success(ElaMessageBarType::BottomRight, "验证通过",
                                QString("解析成功: %1 个分组, %2 个配置项").arg(sectionCount).arg(keyCount), 2000);
+        // 添加成功日志
+        if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+            mainWin->appendLog("SUCCESS", QString("INI 验证通过: %1 (%2 个分组, %3 个配置项)")
+                .arg(fileName).arg(sectionCount).arg(keyCount));
+        }
     } else {
         ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
                                "未知的配置格式", 1500);

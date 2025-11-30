@@ -62,11 +62,12 @@ namespace Prism {
             _closeDialog->exec();
         });
 
+        // 加载上次打开的项目（在日志窗口初始化后）
+        loadProjectsFromSettings();
+
         // 初始化成功提示
         ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功", "Prism 初始化完成", 2000);
-
-        // 加载上次打开的项目
-        loadProjectsFromSettings();
+        appendLog("SUCCESS", "Prism 初始化完成");
     }
 
     MainWindow::~MainWindow() = default;
@@ -394,6 +395,7 @@ namespace Prism {
         if (!silent) {
             ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
                                    QString("项目已添加: %1").arg(info.name), 2000);
+            appendLog("SUCCESS", QString("项目已导入: \"%1\" (%2)").arg(info.name, projectPath));
         }
 
         return projectId;
@@ -449,6 +451,7 @@ namespace Prism {
         // 保存项目列表
         saveProjectsToSettings();
 
+        appendLog("WARNING", QString("项目已从列表移除: \"%1\"").arg(projectName));
         ElaMessageBar::information(ElaMessageBarType::BottomRight, "信息",
                                    QString("项目已移除: %1").arg(projectName), 2000);
     }
@@ -473,6 +476,7 @@ namespace Prism {
         // 导航到首页
         navigation(_homePage->property("ElaPageKey").toString());
 
+        appendLog("INFO", QString("已关闭项目: \"%1\"").arg(projectName));
         ElaMessageBar::information(ElaMessageBarType::BottomRight, "信息",
                                    QString("已关闭项目: %1").arg(projectName), 1500);
     }
@@ -501,6 +505,7 @@ namespace Prism {
         _openedProjects[projectId].isActive = true;
         _currentProjectId = projectId;
 
+        appendLog("INFO", QString("已切换到项目: \"%1\"").arg(_openedProjects[projectId].name));
         qDebug() << "激活项目:" << _openedProjects[projectId].name;
     }
 
