@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <memory>
 
+class ElaPlainTextEdit;
 // 前向声明 ElaWidgetTools 类
 class ElaStatusBar;
 class ElaContentDialog;
@@ -63,15 +64,22 @@ public:
     /**
      * @brief 添加新项目到导航树
      * @param projectPath 项目根目录路径
+     * @param silent 是否静默模式（不显示消息提示）
      * @return 项目 ID (失败返回空字符串)
      */
-    QString addProject(const QString& projectPath);
+    QString addProject(const QString& projectPath, bool silent = false);
 
     /**
-     * @brief 关闭项目（移除导航节点）
+     * @brief 从列表移除项目（移除导航节点，不删除本地文件）
      * @param projectId 项目 ID
      */
-    void closeProject(const QString& projectId);
+    void removeProject(const QString& projectId);
+
+    /**
+     * @brief 关闭项目（仅取消激活状态，项目仍保留在列表中）
+     * @param projectId 项目 ID
+     */
+    void deactivateProject(const QString& projectId);
 
     /**
      * @brief 切换当前激活项目
@@ -79,15 +87,22 @@ public:
      */
     void setActiveProject(const QString& projectId);
 
+    /**
+     * @brief 添加日志消息
+     * @param level 日志级别 (INFO/SUCCESS/WARNING/ERROR/DEBUG/PROCESS/STDOUT/STDERR)
+     * @param message 日志内容
+     */
+    void appendLog(const QString& level, const QString& message);
+
 private slots:
     // ========================================
     // 菜单栏槽函数
     // ========================================
     // 文件菜单
-    void onNewProject();          // 新建项目 (Ctrl+N)
-    void onOpenProject();         // 打开项目 (Ctrl+O)
-    void onSaveConfig();          // 保存配置 (Ctrl+S)
-    void onCloseCurrentProject(); // 关闭当前项目 (Ctrl+W)
+    void onImportProject();       // 导入项目 (Ctrl+O)
+    void onSaveConfig();          // 保存 (Ctrl+S)
+    void onCloseCurrentProject(); // 关闭当前项目 (Ctrl+W) - 仅取消激活
+    void onRemoveProject();       // 从列表移除
     void onExit();                // 退出 (Ctrl+Q)
 
     // 项目菜单
@@ -95,6 +110,9 @@ private slots:
     void onAddConfigFile();       // 添加配置文件
     void onRefreshProject();      // 刷新项目
     void onOpenInExplorer();      // 在资源管理器中打开
+
+    // 主题变化响应
+    void onThemeChanged(ElaThemeType::ThemeMode mode);
 
 private:
     // ========================================
@@ -106,10 +124,11 @@ private:
     // ========================================
     // 多项目管理数据结构
     // ========================================
-    QMap<QString, ProjectInfo> _openedProjects;        // 已打开的项目
+    QMap<QString, ProjectInfo> _openedProjects;        // 已打开的项目 (projectId -> ProjectInfo)
     QMap<QString, QString> _projectExpanderKeys;       // 项目ID -> 展开节点Key
     QMap<QString, BasePage*> _projectConfigPages;      // 项目ID -> 配置页面
     QMap<QString, BasePage*> _projectProcessPages;     // 项目ID -> 进程页面
+    QMap<QString, QString> _pageKeyToProjectId;        // 页面Key -> 项目ID (反向查找)
     QString _currentProjectId;                         // 当前激活的项目ID
 
     // ========================================
@@ -124,6 +143,7 @@ private:
     ElaMenuBar* _menuBar{ nullptr };
     ElaStatusBar* _statusBar{ nullptr };
     ElaContentDialog* _closeDialog{ nullptr };
+    ElaPlainTextEdit* _logTextEdit{ nullptr };  // 日志窗口
 
     // ========================================
     // 业务逻辑
@@ -131,15 +151,11 @@ private:
     std::unique_ptr<ProjectManager> m_projectManager;
 
     // ========================================
-    // 辅助方法（预留）
+    // 辅助方法
     // ========================================
-    // TODO: 添加项目持久化方法
-    // void saveProjectsToConfig();
-    // void loadProjectsFromConfig();
-
-    // TODO: 添加最近项目管理
-    // QStringList getRecentProjects();
-    // void updateRecentProjects(const QString& projectId);
+    void saveProjectsToSettings();      // 保存项目列表到 QSettings
+    void loadProjectsFromSettings();    // 从 QSettings 加载项目列表
+    void updateCurrentProjectFromPageKey(const QString& pageKey);  // 根据页面Key更新当前项目
 };
 
 } // namespace Prism
