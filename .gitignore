@@ -1,6 +1,3 @@
-# claude项目配置文件
-/.claude/
-CLAUDE.md
 # 1. 编译产物目录（CMake生成的build文件夹）
 /build/
 # Debug   build.bat专用构建目录
@@ -76,3 +73,6 @@ compile_commands.json
 # 8. 其他不需要纳入版本控制的文件
 开发环境配置.txt
 ElaWidgetTools_Usage.md
+# claude项目配置文件
+/.claude/
+CLAUDE.md

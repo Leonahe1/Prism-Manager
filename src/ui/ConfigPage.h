@@ -3,8 +3,10 @@
 
 #include "BasePage.h"
 #include "ElaDef.h"
+#include "core/ParserFactory.h"
 #include <QMap>
 #include <QString>
+#include <QVariant>
 
 class ElaCentralStackedWidget;
 class ElaWidget;
@@ -75,6 +77,7 @@ public:
     ~ConfigPage() override;
 
     void setProjectName(const QString& projectName);
+    void setProjectRootPath(const QString& rootPath);
     void loadConfigFiles(const QStringList& configFiles);
     void openConfigFile(const QString& filePath);
 
@@ -98,6 +101,7 @@ public slots:
 signals:
     void configFileModified(const QString& filePath);
     void configFileSaved(const QString& filePath);
+    void configFileAdded(const QString& filePath);  // 新增：通知添加了新配置文件
 
 private:
     // ========================================
@@ -113,6 +117,13 @@ private:
     void updateSyntaxHighlighter(const QString& format);
 
     /**
+     * @brief 从 QVariant 推断并创建 ConfigItem
+     * @param variant QVariant 值
+     * @return ConfigItem 包含值和类型
+     */
+    ConfigItem variantToConfigItem(const QVariant& variant);
+
+    /**
      * @brief 从源码同步到组件模式
      */
     void syncSourceToForm();
@@ -123,52 +134,22 @@ private:
     void syncFormToSource();
 
     /**
-     * @brief 解析 INI 格式配置
-     * @return 分组的键值对映射，包含类型信息
+     * @brief 使用 ParserFactory 解析配置文件
+     * @param filePath 文件路径
+     * @return 解析后的配置项映射
      */
-    QMap<QString, QMap<QString, ConfigItem>> parseIniContent(const QString& content);
+    QMap<QString, ConfigItem> parseConfigFile(const QString& filePath);
 
     /**
-     * @brief 构建 INI 格式的表单界面
+     * @brief 构建表单界面（统一方法）
+     * @param configData 配置数据
      */
-    void buildIniForm();
+    void buildForm(const QMap<QString, ConfigItem>& configData);
 
     /**
-     * @brief 从 INI 表单收集数据并同步到源码编辑器
+     * @brief 从表单收集数据并保存到文件
      */
-    void collectIniFormToSource();
-
-    /**
-     * @brief 解析 YAML 格式配置
-     * @return 扁平化的键值对映射，包含类型信息 (例如: "server.host" -> ConfigItem{"localhost", String})
-     */
-    QMap<QString, ConfigItem> parseYamlContent(const QString& content);
-
-    /**
-     * @brief 构建 YAML 格式的表单界面
-     */
-    void buildYamlForm();
-
-    /**
-     * @brief 从 YAML 表单收集数据并同步到源码编辑器
-     */
-    void collectYamlFormToSource();
-
-    /**
-     * @brief 解析 JSON 格式配置
-     * @return 扁平化的键值对映射，包含类型信息 (例如: "server.host" -> ConfigItem{"localhost", String})
-     */
-    QMap<QString, ConfigItem> parseJsonContent(const QString& content);
-
-    /**
-     * @brief 构建 JSON 格式的表单界面
-     */
-    void buildJsonForm();
-
-    /**
-     * @brief 从 JSON 表单收集数据并同步到源码编辑器
-     */
-    void collectJsonFormToSource();
+    void collectFormAndSave();
 
     /**
      * @brief 清空表单控件
@@ -179,6 +160,12 @@ private:
      * @brief 获取卡片样式表（根据当前主题）
      */
     QString getCardStyleSheet() const;
+
+    /**
+     * @brief 获取分割器与滚动条在不同主题下的样式表
+     * @return 根据当前主题获取的样式表
+     */
+    QString getSplitterAndScrollBarStyleSheet() const;
 
 private:
     // ========================================
@@ -211,6 +198,8 @@ private:
     // 数据管理
     // ========================================
     QString _currentProjectName;
+    QString _currentProjectRootPath;  // 新增：项目根路径
+    QStringList _currentConfigFiles;  // 新增：当前配置文件列表
     QString _currentFilePath;
     QString _currentFormat;
     QMap<QString, QString> _filePathToFormat;

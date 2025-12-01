@@ -65,6 +65,25 @@ namespace Prism {
         // 加载上次打开的项目（在日志窗口初始化后）
         loadProjectsFromSettings();
 
+        // 定义日志级别对应的颜色（深色主题）
+        m_darkColors["INFO"] = "#61AFEF";      // 蓝色
+        m_darkColors["SUCCESS"] = "#98C379";   // 绿色
+        m_darkColors["WARNING"] = "#E5C07B";   // 黄色
+        m_darkColors["ERROR"] = "#E06C75";     // 红色
+        m_darkColors["DEBUG"] = "#C678DD";     // 紫色
+        m_darkColors["PROCESS"] = "#56B6C2";   // 青色
+        m_darkColors["STDOUT"] = "#ABB2BF";    // 灰白
+        m_darkColors["STDERR"] = "#E06C75";    // 红色
+
+        // 定义日志级别对应的颜色（浅色主题）
+        m_lightColors["INFO"] = "#0078D4";     // 蓝色
+        m_lightColors["SUCCESS"] = "#107C10";  // 绿色
+        m_lightColors["WARNING"] = "#F7630C";  // 橙色
+        m_lightColors["ERROR"] = "#D13438";    // 红色
+        m_lightColors["DEBUG"] = "#8764B8";    // 紫色
+        m_lightColors["PROCESS"] = "#00979C";  // 青色
+        m_lightColors["STDOUT"] = "#323130";   // 深灰
+        m_lightColors["STDERR"] = "#D13438";   // 红色
         // 初始化成功提示
         ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功", "Prism 初始化完成", 2000);
         appendLog("SUCCESS", "Prism 初始化完成");
@@ -352,10 +371,26 @@ namespace Prism {
         info.lastOpened = QDateTime::currentDateTime();
         info.isActive = false;
 
-        // 扫描配置文件
+        // 扫描配置文件（优先扫描 config 子目录，如果不存在则扫描根目录）
         QStringList nameFilters = {"*.ini", "*.json", "*.yaml", "*.yml", "*.conf"};
-        QFileInfoList fileInfoList = projectDir.entryInfoList(nameFilters, QDir::Files);
-        for (const QFileInfo &fileInfo: fileInfoList) {
+        QDir configDir(projectDir.absoluteFilePath("config"));
+
+        QFileInfoList fileInfoList;
+        if (configDir.exists())
+        {
+            // 扫描 config 子目录
+            fileInfoList = configDir.entryInfoList(nameFilters, QDir::Files);
+            qDebug() << "扫描配置目录:" << configDir.absolutePath() << "找到" << fileInfoList.size() << "个文件";
+        }
+        else
+        {
+            // 如果 config 目录不存在，扫描根目录
+            fileInfoList = projectDir.entryInfoList(nameFilters, QDir::Files);
+            qDebug() << "config 目录不存在，扫描根目录:" << projectDir.absolutePath() << "找到" << fileInfoList.size() << "个文件";
+        }
+
+        for (const QFileInfo &fileInfo: fileInfoList)
+        {
             info.configFiles.append(fileInfo.absoluteFilePath());
         }
 
@@ -364,6 +399,7 @@ namespace Prism {
         // 创建项目专属页面
         ConfigPage *configPage = new ConfigPage(this);
         configPage->setProjectName(info.name);
+        configPage->setProjectRootPath(info.rootPath);  // 设置项目根路径
         configPage->loadConfigFiles(info.configFiles);
 
         ProcessPage *processPage = new ProcessPage(this);
@@ -378,6 +414,16 @@ namespace Prism {
         // 获取页面的 Key（用于反向查找）
         QString configPageKey = configPage->property("ElaPageKey").toString();
         QString processPageKey = processPage->property("ElaPageKey").toString();
+
+        // 连接配置文件添加信号
+        connect(configPage, &ConfigPage::configFileAdded, this, [this, projectId](const QString& filePath) {
+            // 更新项目的配置文件列表
+            if (_openedProjects.contains(projectId)) {
+                _openedProjects[projectId].configFiles.append(filePath);
+                saveProjectsToSettings();
+                qDebug() << "项目" << _openedProjects[projectId].name << "添加配置文件:" << filePath;
+            }
+        });
 
         // 保存引用（使用 projectId 作为 key）
         _projectConfigPages[projectId] = configPage;
@@ -685,17 +731,26 @@ namespace Prism {
         // 清除旧数据
         settings.remove("");
 
-        // 保存项目列表
-        QStringList projectPaths;
+        // 保存项目数量
+        settings.setValue("count", _openedProjects.size());
+
+        // 为每个项目保存详细信息
+        int index = 0;
         for (const auto& project : _openedProjects) {
-            projectPaths.append(project.rootPath);
+            settings.beginGroup(QString("project_%1").arg(index));
+            settings.setValue("id", project.id);
+            settings.setValue("name", project.name);
+            settings.setValue("rootPath", project.rootPath);
+            settings.setValue("configFiles", project.configFiles);  // 保存配置文件列表
+            settings.setValue("lastOpened", project.lastOpened);
+            settings.endGroup();
+            index++;
         }
-        settings.setValue("paths", projectPaths);
 
         settings.endGroup();
         settings.sync();
 
-        qDebug() << "已保存项目列表:" << projectPaths.size() << "个项目";
+        qDebug() << "已保存项目列表:" << _openedProjects.size() << "个项目";
     }
 
     void MainWindow::loadProjectsFromSettings()
@@ -703,28 +758,107 @@ namespace Prism {
         QSettings settings("GTTC", "Prism");
         settings.beginGroup("Projects");
 
-        QStringList projectPaths = settings.value("paths").toStringList();
+        int projectCount = settings.value("count", 0).toInt();
         settings.endGroup();
 
-        qDebug() << "加载项目列表:" << projectPaths.size() << "个项目";
+        qDebug() << "加载项目列表:" << projectCount << "个项目";
 
-        // 重新打开每个项目（静默模式）
         int loadedCount = 0;
-        for (const QString& path : projectPaths) {
-            QDir dir(path);
-            if (dir.exists()) {
-                if (!addProject(path, true).isEmpty()) {
-                    loadedCount++;
-                }
-            } else {
-                qWarning() << "项目目录不存在，跳过:" << path;
+        for (int i = 0; i < projectCount; ++i) {
+            settings.beginGroup("Projects");
+            settings.beginGroup(QString("project_%1").arg(i));
+
+            QString rootPath = settings.value("rootPath").toString();
+            QDir projectDir(rootPath);
+
+            // 检查项目目录是否存在
+            if (!projectDir.exists()) {
+                qWarning() << "项目目录不存在，跳过:" << rootPath;
+                settings.endGroup();
+                settings.endGroup();
+                continue;
             }
+
+            // 恢复项目信息
+            ProjectInfo info;
+            info.id = settings.value("id").toString();
+            info.name = settings.value("name").toString();
+            info.rootPath = rootPath;
+            info.configFiles = settings.value("configFiles").toStringList();  // 恢复配置文件列表
+            info.lastOpened = settings.value("lastOpened").toDateTime();
+            info.isActive = false;
+
+            settings.endGroup();
+            settings.endGroup();
+
+            // 如果配置文件列表为空，重新扫描（兼容旧版本数据）
+            if (info.configFiles.isEmpty()) {
+                QStringList nameFilters = {"*.ini", "*.json", "*.yaml", "*.yml", "*.conf"};
+                QDir configDir(projectDir.absoluteFilePath("config"));
+
+                QFileInfoList fileInfoList;
+                if (configDir.exists()) {
+                    fileInfoList = configDir.entryInfoList(nameFilters, QDir::Files);
+                } else {
+                    fileInfoList = projectDir.entryInfoList(nameFilters, QDir::Files);
+                }
+
+                for (const QFileInfo &fileInfo: fileInfoList) {
+                    info.configFiles.append(fileInfo.absoluteFilePath());
+                }
+                qDebug() << "项目" << info.name << "配置文件列表为空，重新扫描得到" << info.configFiles.size() << "个文件";
+            }
+
+            // 添加到已打开项目列表
+            _openedProjects[info.id] = info;
+
+            // 创建项目专属页面
+            ConfigPage *configPage = new ConfigPage(this);
+            configPage->setProjectName(info.name);
+            configPage->setProjectRootPath(info.rootPath);
+            configPage->loadConfigFiles(info.configFiles);
+
+            ProcessPage *processPage = new ProcessPage(this);
+            processPage->setProjectName(info.name);
+
+            // 注册到导航树
+            QString projectExpanderKey;
+            addExpanderNode(info.name, projectExpanderKey, _projectManagementKey, ElaIconType::Folder);
+            addPageNode("配置文件", configPage, projectExpanderKey, 0, ElaIconType::FileCode);
+            addPageNode("进程监控", processPage, projectExpanderKey, ElaIconType::Terminal);
+
+            // 获取页面的 Key
+            QString configPageKey = configPage->property("ElaPageKey").toString();
+            QString processPageKey = processPage->property("ElaPageKey").toString();
+
+            // 连接配置文件添加信号
+            connect(configPage, &ConfigPage::configFileAdded, this, [this, projectId = info.id](const QString& filePath) {
+                if (_openedProjects.contains(projectId)) {
+                    _openedProjects[projectId].configFiles.append(filePath);
+                    saveProjectsToSettings();
+                    qDebug() << "项目" << _openedProjects[projectId].name << "添加配置文件:" << filePath;
+                }
+            });
+
+            // 保存引用
+            _projectConfigPages[info.id] = configPage;
+            _projectProcessPages[info.id] = processPage;
+            _projectExpanderKeys[info.id] = projectExpanderKey;
+
+            // 建立页面Key到项目ID的反向映射
+            _pageKeyToProjectId[configPageKey] = info.id;
+            _pageKeyToProjectId[processPageKey] = info.id;
+            _pageKeyToProjectId[projectExpanderKey] = info.id;
+
+            loadedCount++;
+            qDebug() << "恢复项目:" << info.name << "配置文件数:" << info.configFiles.size();
         }
 
         // 显示汇总消息
         if (loadedCount > 0) {
             ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
                                    QString("已恢复 %1 个项目").arg(loadedCount), 2000);
+            appendLog("INFO", QString("已恢复 %1 个项目").arg(loadedCount));
         }
     }
 
@@ -752,31 +886,9 @@ namespace Prism {
         // 获取当前时间戳
         QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
 
-        // 定义日志级别对应的颜色（深色主题）
-        QMap<QString, QString> darkColors;
-        darkColors["INFO"] = "#61AFEF";      // 蓝色
-        darkColors["SUCCESS"] = "#98C379";   // 绿色
-        darkColors["WARNING"] = "#E5C07B";   // 黄色
-        darkColors["ERROR"] = "#E06C75";     // 红色
-        darkColors["DEBUG"] = "#C678DD";     // 紫色
-        darkColors["PROCESS"] = "#56B6C2";   // 青色
-        darkColors["STDOUT"] = "#ABB2BF";    // 灰白
-        darkColors["STDERR"] = "#E06C75";    // 红色
-
-        // 定义日志级别对应的颜色（浅色主题）
-        QMap<QString, QString> lightColors;
-        lightColors["INFO"] = "#0078D4";     // 蓝色
-        lightColors["SUCCESS"] = "#107C10";  // 绿色
-        lightColors["WARNING"] = "#F7630C";  // 橙色
-        lightColors["ERROR"] = "#D13438";    // 红色
-        lightColors["DEBUG"] = "#8764B8";    // 紫色
-        lightColors["PROCESS"] = "#00979C";  // 青色
-        lightColors["STDOUT"] = "#323130";   // 深灰
-        lightColors["STDERR"] = "#D13438";   // 红色
-
         // 根据当前主题选择颜色方案
         bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
-        QMap<QString, QString> &colors = isDark ? darkColors : lightColors;
+        QMap<QString, QString> &colors = isDark ? m_darkColors : m_lightColors;
 
         // 获取颜色
         QString color = colors.value(level, isDark ? "#D4D4D4" : "#323130");
