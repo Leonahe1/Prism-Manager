@@ -144,6 +144,8 @@ private:
     ElaStatusBar* _statusBar{ nullptr };
     ElaContentDialog* _closeDialog{ nullptr };
     ElaPlainTextEdit* _logTextEdit{ nullptr };  // 日志窗口
+    QMap<QString, QString> m_darkColors;
+    QMap<QString, QString> m_lightColors;
 
     // ========================================
     // 业务逻辑
