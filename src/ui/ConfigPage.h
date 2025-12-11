@@ -7,6 +7,8 @@
 #include <QMap>
 #include <QString>
 #include <QVariant>
+#include <QJsonObject>
+#include <QJsonDocument>
 
 class ElaCentralStackedWidget;
 class ElaWidget;
@@ -152,6 +154,12 @@ private:
     void collectFormAndSave();
 
     /**
+     * @brief 从表单收集数据并生成文本（不保存文件）
+     * @return 生成的配置文本
+     */
+    QString collectFormToText();
+
+    /**
      * @brief 清空表单控件
      */
     void clearFormWidgets();
@@ -166,6 +174,65 @@ private:
      * @return 根据当前主题获取的样式表
      */
     QString getSplitterAndScrollBarStyleSheet() const;
+
+    /**
+     * @brief 从扁平化数据构建嵌套的 JSON 对象
+     * @param flatData 扁平化数据（键使用 "." 分隔）
+     * @return 嵌套的 JSON 对象
+     */
+    QJsonObject buildNestedJsonObject(const QVariantMap& flatData);
+
+    /**
+     * @brief 递归设置嵌套 JSON 值
+     * @param obj JSON 对象
+     * @param keys 键路径列表
+     * @param value 要设置的值
+     */
+    void setNestedJsonValue(QJsonObject& obj, const QStringList& keys, const QVariant& value);
+
+    /**
+     * @brief 解析数组字符串（如 "[item1, item2, item3]"）
+     * @param text 数组字符串
+     * @return 如果是数组格式返回 QVariantList，否则返回原字符串
+     */
+    QVariant parseArrayString(const QString& text);
+
+    /**
+     * @brief 将扁平化数据转换为嵌套结构
+     * @param flatData 扁平化数据（键使用 "." 分隔）
+     * @return 嵌套的 QVariantMap
+     */
+    QVariantMap convertFlatToNestedMap(const QVariantMap& flatData);
+
+    /**
+     * @brief 递归设置嵌套 QVariantMap 值
+     * @param map QVariantMap 对象
+     * @param keys 键路径列表
+     * @param value 要设置的值
+     */
+    void setNestedValue(QVariantMap& map, const QStringList& keys, const QVariant& value);
+
+    /**
+     * @brief 在原始 JSON 文档中增量更新值（保持结构和顺序不变）
+     * @param flatData 表单收集的扁平化数据
+     * @return 更新后的 JSON 文本
+     */
+    QString updateJsonInPlace(const QVariantMap& flatData);
+
+    /**
+     * @brief 在 JSON 对象中按路径更新值
+     * @param obj JSON 对象
+     * @param path 路径字符串（如 "data.filters.timeRange.start"）
+     * @param value 新值
+     */
+    void updateJsonValueByPath(QJsonObject& obj, const QString& path, const QVariant& value);
+
+    /**
+     * @brief 在原始 YAML 内容中增量更新值
+     * @param flatData 表单收集的扁平化数据
+     * @return 更新后的 YAML 文本
+     */
+    QString updateYamlInPlace(const QVariantMap& flatData);
 
 private:
     // ========================================
@@ -211,6 +278,10 @@ private:
 
     // 卡片列表（用于主题更新）
     QList<QWidget*> _formCards;
+
+    // 原始文档内容（用于保持保存时的结构不变）
+    QString _originalContent;           // 原始文件内容
+    QJsonDocument _originalJsonDoc;     // 原始 JSON 文档（仅 JSON 格式）
 };
 
 } // namespace Prism

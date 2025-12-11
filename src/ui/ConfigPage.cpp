@@ -275,8 +275,16 @@ namespace Prism {
             return;
         }
 
-        // 使用统一的保存方法
-        collectFormAndSave();
+        // 如果没有修改，直接返回（保持编辑器原内容）
+        if (!_isModified) {
+            return;
+        }
+
+        // 从表单收集数据并生成文本，更新编辑器（不保存文件）
+        QString generatedText = collectFormToText();
+        if (!generatedText.isEmpty()) {
+            _configEditor->setPlainText(generatedText);
+        }
     }
 
     void ConfigPage::clearFormWidgets()
@@ -355,9 +363,24 @@ namespace Prism {
         QString content = in.readAll();
         file.close();
 
+        // 保存原始内容（用于增量更新）
+        _originalContent = content;
+
+        // 如果是 JSON 格式，解析并保存原始文档
+        QString format = detectConfigFormat(filePath);
+        if (format == "json") {
+            QJsonParseError parseError;
+            _originalJsonDoc = QJsonDocument::fromJson(content.toUtf8(), &parseError);
+            if (parseError.error != QJsonParseError::NoError) {
+                _originalJsonDoc = QJsonDocument();  // 解析失败时清空
+            }
+        } else {
+            _originalJsonDoc = QJsonDocument();  // 非 JSON 格式清空
+        }
+
         _configEditor->setPlainText(content);
         _currentFilePath = filePath;
-        _currentFormat = detectConfigFormat(filePath);
+        _currentFormat = format;
         _isModified = false;
         _saveButton->setEnabled(false);
 
@@ -751,7 +774,30 @@ namespace Prism {
 
         // 将 QVariantMap 转换为 ConfigItem
         for (auto it = variantMap.constBegin(); it != variantMap.constEnd(); ++it) {
-            result[it.key()] = variantToConfigItem(it.value());
+            QString key = it.key();
+            QVariant value = it.value();
+
+            // 检查是否是数组
+            if (value.type() == QVariant::List) {
+                QVariantList list = value.toList();
+                if (!list.isEmpty() && list.first().type() == QVariant::Map) {
+                    // 对象数组：展开每个元素的字段
+                    for (int i = 0; i < list.size(); ++i) {
+                        QVariantMap objMap = list[i].toMap();
+                        for (auto objIt = objMap.constBegin(); objIt != objMap.constEnd(); ++objIt) {
+                            // 键格式：products[0].productId, products[0].price 等
+                            QString arrayKey = QString("%1[%2].%3").arg(key).arg(i).arg(objIt.key());
+                            result[arrayKey] = variantToConfigItem(objIt.value());
+                        }
+                    }
+                } else {
+                    // 简单数组：保持原样
+                    result[key] = variantToConfigItem(value);
+                }
+            } else {
+                // 非数组：直接转换
+                result[key] = variantToConfigItem(value);
+            }
         }
 
         qDebug() << "解析配置文件成功:" << filePath << "共" << result.size() << "个配置项";
@@ -769,23 +815,36 @@ namespace Prism {
         }
 
         // 按照第一级键（顶层节点）分组
+        // 支持普通键（userInfo.address.city）和数组键（products[0].productId）
         QMap<QString, QMap<QString, ConfigItem>> groupedData;
 
         for (auto it = configData.begin(); it != configData.end(); ++it) {
             QString fullKey = it.key();
             const ConfigItem &item = it.value();
 
-            // 分离顶层节点和子节点
-            int dotPos = fullKey.indexOf('.');
             QString topLevelKey;
             QString subKey;
 
-            if (dotPos != -1) {
-                topLevelKey = fullKey.left(dotPos);
-                subKey = fullKey.mid(dotPos + 1);
+            // 检查是否是数组键格式（如 products[0].productId）
+            QRegularExpression arrayRegex("^([^\\[]+)\\[(\\d+)\\]\\.(.+)$");
+            QRegularExpressionMatch match = arrayRegex.match(fullKey);
+
+            if (match.hasMatch()) {
+                // 数组键：分组名为 "arrayName[index]"
+                QString arrayName = match.captured(1);
+                QString index = match.captured(2);
+                topLevelKey = QString("%1[%2]").arg(arrayName, index);
+                subKey = match.captured(3);
             } else {
-                topLevelKey = "General"; // 顶层标量值放在 General 组
-                subKey = fullKey;
+                // 普通键：使用第一个 "." 分隔
+                int dotPos = fullKey.indexOf('.');
+                if (dotPos != -1) {
+                    topLevelKey = fullKey.left(dotPos);
+                    subKey = fullKey.mid(dotPos + 1);
+                } else {
+                    topLevelKey = "General";
+                    subKey = fullKey;
+                }
             }
 
             groupedData[topLevelKey][subKey] = item;
@@ -955,8 +1014,8 @@ namespace Prism {
             return;
         }
 
-        // 从表单控件收集数据
-        QVariantMap configData;
+        // 从表单控件收集数据（扁平化格式）
+        QVariantMap flatData;
 
         for (auto it = _formWidgetMap.begin(); it != _formWidgetMap.end(); ++it) {
             QString path = it.key();
@@ -966,7 +1025,9 @@ namespace Prism {
 
             // 根据控件类型获取值
             if (auto lineEdit = qobject_cast<ElaLineEdit*>(widget)) {
-                value = lineEdit->text();
+                QString text = lineEdit->text();
+                // 尝试解析数组字符串（如 "[item1, item2, item3]"）
+                value = parseArrayString(text);
             }
             else if (auto spinBox = qobject_cast<ElaSpinBox*>(widget)) {
                 value = spinBox->value();
@@ -978,14 +1039,55 @@ namespace Prism {
                 value = toggleSwitch->getIsToggled();
             }
 
-            configData[path] = value;
+            flatData[path] = value;
         }
 
-        // 使用 ParserFactory 保存配置
+        // 根据格式选择保存方式
         ParserFactory& factory = ParserFactory::instance();
         ConfigFormat format = factory.detectFormat(_currentFilePath);
 
-        bool success = factory.save(_currentFilePath, configData, format);
+        QString updatedContent;
+        bool success = false;
+
+        if (format == ConfigFormat::JSON) {
+            // JSON 格式：使用增量更新保持原始结构
+            updatedContent = updateJsonInPlace(flatData);
+            if (!updatedContent.isEmpty()) {
+                QFile file(_currentFilePath);
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out.setCodec("UTF-8");
+                    out << updatedContent;
+                    file.close();
+                    success = true;
+
+                    // 更新原始文档
+                    _originalContent = updatedContent;
+                    QJsonParseError parseError;
+                    _originalJsonDoc = QJsonDocument::fromJson(updatedContent.toUtf8(), &parseError);
+                }
+            }
+        } else if (format == ConfigFormat::YAML) {
+            // YAML 格式：使用增量更新保持原始结构
+            updatedContent = updateYamlInPlace(flatData);
+            if (!updatedContent.isEmpty()) {
+                QFile file(_currentFilePath);
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out.setCodec("UTF-8");
+                    out << updatedContent;
+                    file.close();
+                    success = true;
+
+                    // 更新原始内容
+                    _originalContent = updatedContent;
+                }
+            }
+        } else {
+            // INI 格式：使用原有方式
+            QVariantMap configData = flatData;
+            success = factory.save(_currentFilePath, configData, format);
+        }
 
         if (success) {
             // 重新读取文件内容到源码编辑器
@@ -1012,14 +1114,295 @@ namespace Prism {
         } else {
             QString error = factory.getLastError();
             ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
-                                 QString("保存失败: %1").arg(error), 2000);
+                                 QString("保存失败: %1").arg(error.isEmpty() ? "写入文件失败" : error), 2000);
 
             if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
-                mainWin->appendLog("ERROR", QString("保存失败: %1").arg(error));
+                mainWin->appendLog("ERROR", QString("保存失败: %1").arg(error.isEmpty() ? "写入文件失败" : error));
             }
         }
 
         qDebug() << "从表单保存配置文件:" << _currentFilePath << "结果:" << (success ? "成功" : "失败");
+    }
+
+    QString ConfigPage::collectFormToText()
+    {
+        if (_currentFilePath.isEmpty()) {
+            qWarning() << "没有打开的配置文件";
+            return QString();
+        }
+
+        // 从表单控件收集数据
+        QVariantMap flatData;
+        for (auto it = _formWidgetMap.begin(); it != _formWidgetMap.end(); ++it) {
+            QString path = it.key();
+            QWidget *widget = it.value();
+
+            QVariant value;
+
+            // 根据控件类型获取值
+            if (auto lineEdit = qobject_cast<ElaLineEdit*>(widget)) {
+                QString text = lineEdit->text();
+                // 尝试解析数组字符串
+                value = parseArrayString(text);
+            }
+            else if (auto spinBox = qobject_cast<ElaSpinBox*>(widget)) {
+                value = spinBox->value();
+            }
+            else if (auto doubleSpinBox = qobject_cast<ElaDoubleSpinBox*>(widget)) {
+                value = doubleSpinBox->value();
+            }
+            else if (auto toggleSwitch = qobject_cast<ElaToggleSwitch*>(widget)) {
+                value = toggleSwitch->getIsToggled();
+            }
+
+            flatData[path] = value;
+        }
+
+        // 根据格式生成文本
+        ParserFactory& factory = ParserFactory::instance();
+        ConfigFormat format = factory.detectFormat(_currentFilePath);
+
+        if (format == ConfigFormat::JSON) {
+            // JSON 格式：使用增量更新保持原始结构
+            return updateJsonInPlace(flatData);
+        }
+        else if (format == ConfigFormat::YAML) {
+            // YAML 格式：使用增量更新保持原始结构
+            return updateYamlInPlace(flatData);
+        }
+        else if (format == ConfigFormat::INI) {
+            // INI 格式：重新构建分组结构
+            QStringList lines;
+            QMap<QString, QStringList> groups;
+
+            for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+                QString fullPath = it.key();
+                QVariant value = it.value();
+
+                int dotPos = fullPath.indexOf('.');
+                QString section, key;
+
+                if (dotPos != -1) {
+                    section = fullPath.left(dotPos);
+                    key = fullPath.mid(dotPos + 1);
+                } else {
+                    section = "General";
+                    key = fullPath;
+                }
+
+                QString valueLine = QString("%1=%2").arg(key, value.toString());
+                groups[section].append(valueLine);
+            }
+
+            // 生成 INI 文本
+            for (auto groupIt = groups.constBegin(); groupIt != groups.constEnd(); ++groupIt) {
+                lines.append(QString("[%1]").arg(groupIt.key()));
+                lines.append(groupIt.value());
+                lines.append("");  // 空行分隔
+            }
+
+            return lines.join("\n");
+        }
+
+        return QString();
+    }
+
+    QJsonObject ConfigPage::buildNestedJsonObject(const QVariantMap& flatData)
+    {
+        QJsonObject rootObject;
+
+        for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+            QString path = it.key();
+            QVariant value = it.value();
+
+            // 分割路径（例如 "server.host" -> ["server", "host"]）
+            QStringList keys = path.split('.');
+
+            // 递归构建嵌套对象
+            QJsonObject* currentObject = &rootObject;
+            for (int i = 0; i < keys.size() - 1; ++i) {
+                QString key = keys[i];
+
+                if (!currentObject->contains(key)) {
+                    currentObject->insert(key, QJsonObject());
+                }
+
+                QJsonValue val = currentObject->value(key);
+                if (val.isObject()) {
+                    QJsonObject nested = val.toObject();
+                    currentObject->insert(key, nested);
+                    // 注意：QJsonObject 不支持直接获取引用，需要重新取出
+                    // 这里使用一个技巧：保存路径，最后再设置
+                }
+            }
+
+            // 设置最终值
+            setNestedJsonValue(rootObject, keys, value);
+        }
+
+        return rootObject;
+    }
+
+    void ConfigPage::setNestedJsonValue(QJsonObject& obj, const QStringList& keys, const QVariant& value)
+    {
+        if (keys.isEmpty()) {
+            return;
+        }
+
+        if (keys.size() == 1) {
+            // 最后一级，直接设置值
+            obj[keys[0]] = QJsonValue::fromVariant(value);
+            return;
+        }
+
+        // 递归处理嵌套
+        QString firstKey = keys[0];
+        QStringList remainingKeys = keys.mid(1);
+
+        QJsonObject nestedObj;
+        if (obj.contains(firstKey) && obj[firstKey].isObject()) {
+            nestedObj = obj[firstKey].toObject();
+        }
+
+        setNestedJsonValue(nestedObj, remainingKeys, value);
+        obj[firstKey] = nestedObj;
+    }
+
+    QVariant ConfigPage::parseArrayString(const QString& text)
+    {
+        // 检查是否是数组格式 "[item1, item2, item3]"
+        QString trimmed = text.trimmed();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            // 移除首尾的方括号
+            QString content = trimmed.mid(1, trimmed.length() - 2).trimmed();
+
+            if (content.isEmpty()) {
+                // 空数组
+                return QVariantList();
+            }
+
+            // 分割元素（简单实现，不处理嵌套）
+            QStringList items = content.split(',');
+            QVariantList result;
+
+            for (const QString& item : items) {
+                QString trimmedItem = item.trimmed();
+
+                // 尝试解析为数字或保持为字符串
+                bool isInt = false;
+                int intValue = trimmedItem.toInt(&isInt);
+                if (isInt) {
+                    result.append(intValue);
+                    continue;
+                }
+
+                bool isDouble = false;
+                double doubleValue = trimmedItem.toDouble(&isDouble);
+                if (isDouble && trimmedItem.contains('.')) {
+                    result.append(doubleValue);
+                    continue;
+                }
+
+                // 默认作为字符串
+                result.append(trimmedItem);
+            }
+
+            return result;
+        }
+
+        // 不是数组格式，返回原字符串
+        return text;
+    }
+
+    QVariantMap ConfigPage::convertFlatToNestedMap(const QVariantMap& flatData)
+    {
+        QVariantMap result;
+
+        // 收集数组数据：arrayName -> index -> fields
+        QMap<QString, QMap<int, QVariantMap>> arrayData;
+
+        // 遍历所有扁平化数据
+        for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+            QString path = it.key();
+            QVariant value = it.value();
+
+            // 检查是否是数组键格式（如 products[0].productId）
+            QRegularExpression arrayRegex("^([^\\[]+)\\[(\\d+)\\]\\.(.+)$");
+            QRegularExpressionMatch match = arrayRegex.match(path);
+
+            if (match.hasMatch()) {
+                // 数组键：收集到 arrayData 中
+                QString arrayName = match.captured(1);
+                int index = match.captured(2).toInt();
+                QString fieldName = match.captured(3);
+
+                arrayData[arrayName][index][fieldName] = value;
+            } else if (path.contains('.')) {
+                // 嵌套键（如 userInfo.address.city）：递归构建嵌套结构
+                QStringList keys = path.split('.');
+                setNestedValue(result, keys, value);
+            } else {
+                // 顶层键：直接设置
+                result[path] = value;
+            }
+        }
+
+        // 将收集的数组数据转换为 QVariantList 并添加到结果中
+        for (auto arrayIt = arrayData.constBegin(); arrayIt != arrayData.constEnd(); ++arrayIt) {
+            QString arrayName = arrayIt.key();
+            const QMap<int, QVariantMap>& indexMap = arrayIt.value();
+
+            // 找到最大索引
+            int maxIndex = 0;
+            for (auto indexIt = indexMap.constBegin(); indexIt != indexMap.constEnd(); ++indexIt) {
+                if (indexIt.key() > maxIndex) {
+                    maxIndex = indexIt.key();
+                }
+            }
+
+            // 构建数组
+            QVariantList array;
+            for (int i = 0; i <= maxIndex; ++i) {
+                if (indexMap.contains(i)) {
+                    array.append(indexMap[i]);
+                } else {
+                    array.append(QVariantMap());
+                }
+            }
+
+            result[arrayName] = array;
+        }
+
+        return result;
+    }
+
+    void ConfigPage::setNestedValue(QVariantMap& map, const QStringList& keys, const QVariant& value)
+    {
+        if (keys.isEmpty()) {
+            return;
+        }
+
+        if (keys.size() == 1) {
+            // 最后一级，直接设置值
+            map[keys[0]] = value;
+            return;
+        }
+
+        // 递归处理嵌套
+        QString firstKey = keys[0];
+        QStringList remainingKeys = keys.mid(1);
+
+        // 获取或创建嵌套 Map
+        QVariantMap nestedMap;
+        if (map.contains(firstKey) && map[firstKey].type() == QVariant::Map) {
+            nestedMap = map[firstKey].toMap();
+        }
+
+        // 递归设置值
+        setNestedValue(nestedMap, remainingKeys, value);
+
+        // 更新到父 Map
+        map[firstKey] = nestedMap;
     }
 
     QString ConfigPage::getCardStyleSheet() const
@@ -1162,5 +1545,145 @@ namespace Prism {
 
         // 更新分割器
         _mainSplitter->setStyleSheet(getSplitterAndScrollBarStyleSheet());
+    }
+
+    QString ConfigPage::updateJsonInPlace(const QVariantMap& flatData)
+    {
+        if (_originalJsonDoc.isNull() || !_originalJsonDoc.isObject()) {
+            // 没有原始文档，回退到重建方式
+            QJsonObject rootObject = buildNestedJsonObject(flatData);
+            QJsonDocument doc(rootObject);
+            return QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
+        }
+
+        // 复制原始 JSON 对象
+        QJsonObject rootObj = _originalJsonDoc.object();
+
+        // 遍历表单数据，更新对应路径的值
+        for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+            QString path = it.key();
+            QVariant value = it.value();
+            updateJsonValueByPath(rootObj, path, value);
+        }
+
+        // 生成更新后的 JSON 文本
+        QJsonDocument updatedDoc(rootObj);
+        return QString::fromUtf8(updatedDoc.toJson(QJsonDocument::Indented));
+    }
+
+    void ConfigPage::updateJsonValueByPath(QJsonObject& obj, const QString& path, const QVariant& value)
+    {
+        // 处理数组路径格式：products[0].productId
+        QRegularExpression arrayRegex("^([^\\[]+)\\[(\\d+)\\]\\.(.+)$");
+        QRegularExpressionMatch match = arrayRegex.match(path);
+
+        if (match.hasMatch()) {
+            // 数组路径
+            QString arrayName = match.captured(1);
+            int index = match.captured(2).toInt();
+            QString remainingPath = match.captured(3);
+
+            if (obj.contains(arrayName) && obj[arrayName].isArray()) {
+                QJsonArray arr = obj[arrayName].toArray();
+                if (index >= 0 && index < arr.size() && arr[index].isObject()) {
+                    QJsonObject itemObj = arr[index].toObject();
+                    updateJsonValueByPath(itemObj, remainingPath, value);
+                    arr[index] = itemObj;
+                    obj[arrayName] = arr;
+                }
+            }
+            return;
+        }
+
+        // 普通嵌套路径
+        QStringList keys = path.split('.');
+
+        if (keys.size() == 1) {
+            // 最后一级，直接设置值
+            obj[keys[0]] = QJsonValue::fromVariant(value);
+            return;
+        }
+
+        // 递归处理嵌套
+        QString firstKey = keys[0];
+        QString remainingPath = keys.mid(1).join('.');
+
+        if (obj.contains(firstKey) && obj[firstKey].isObject()) {
+            QJsonObject nestedObj = obj[firstKey].toObject();
+            updateJsonValueByPath(nestedObj, remainingPath, value);
+            obj[firstKey] = nestedObj;
+        }
+    }
+
+    QString ConfigPage::updateYamlInPlace(const QVariantMap& flatData)
+    {
+#ifdef YAML_CPP_AVAILABLE
+        if (_originalContent.isEmpty()) {
+            return QString();
+        }
+
+        try {
+            // 解析原始 YAML
+            YAML::Node root = YAML::Load(_originalContent.toStdString());
+
+            // 更新值
+            for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+                QString path = it.key();
+                QVariant value = it.value();
+
+                // 解析路径并更新
+                QStringList keys = path.split('.');
+                YAML::Node* current = &root;
+
+                for (int i = 0; i < keys.size() - 1; ++i) {
+                    QString key = keys[i];
+
+                    // 检查数组索引格式 key[index]
+                    QRegularExpression arrayRegex("^(.+)\\[(\\d+)\\]$");
+                    QRegularExpressionMatch match = arrayRegex.match(key);
+
+                    if (match.hasMatch()) {
+                        QString arrayKey = match.captured(1);
+                        int index = match.captured(2).toInt();
+                        if ((*current)[arrayKey.toStdString()].IsSequence()) {
+                            current = &(*current)[arrayKey.toStdString()][index];
+                        }
+                    } else {
+                        current = &(*current)[key.toStdString()];
+                    }
+                }
+
+                // 设置最终值
+                QString lastKey = keys.last();
+                if (value.type() == QVariant::Bool) {
+                    (*current)[lastKey.toStdString()] = value.toBool();
+                } else if (value.type() == QVariant::Int || value.type() == QVariant::LongLong) {
+                    (*current)[lastKey.toStdString()] = value.toLongLong();
+                } else if (value.type() == QVariant::Double) {
+                    (*current)[lastKey.toStdString()] = value.toDouble();
+                } else if (value.type() == QVariant::List) {
+                    YAML::Node arrayNode(YAML::NodeType::Sequence);
+                    QVariantList list = value.toList();
+                    for (const QVariant& item : list) {
+                        arrayNode.push_back(item.toString().toStdString());
+                    }
+                    (*current)[lastKey.toStdString()] = arrayNode;
+                } else {
+                    (*current)[lastKey.toStdString()] = value.toString().toStdString();
+                }
+            }
+
+            // 输出更新后的 YAML
+            YAML::Emitter emitter;
+            emitter << root;
+            return QString::fromStdString(emitter.c_str());
+
+        } catch (const YAML::Exception& e) {
+            qWarning() << "YAML update failed:" << e.what();
+            return _originalContent;
+        }
+#else
+        return _originalContent;
+#endif
     }
 } // namespace Prism
