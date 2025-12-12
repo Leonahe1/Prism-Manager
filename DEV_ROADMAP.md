@@ -1,7 +1,7 @@
 # Prism 开发路线图
 
 > **项目代号**: Prism (寓意：将混沌的配置像棱镜一样解析得清晰分明)
-> **最后更新**: 2025-12-01
+> **最后更新**: 2025-12-13
 > **当前版本**: v1.0.0-alpha
 
 ---
@@ -21,6 +21,475 @@
 - **构建系统**: CMake 3.15+
 - **编译器**: MSVC 2022 (Windows) / GCC (Linux)
 - **配置解析**: yaml-cpp, Qt JSON
+
+---
+
+## ✅ 最新完成 (2025-12-13)
+
+### **JSON 数组内对象键顺序保持修复**
+
+#### 问题描述
+
+在组件模式下编辑包含对象数组的 JSON 文件后，数组内每个对象的字段顺序会被打乱（按字母排序）。
+
+**问题示例**：
+
+```json
+// 原始文件
+{
+  "products": [
+    {
+      "productId": "PROD001",
+      "productName": "测试商品1",
+      "price": 99.9,
+      "quantity": 2
+    }
+  ]
+}
+
+// 保存后变成（问题）
+{
+  "products": [
+    {
+      "price": 99.9,
+      "productId": "PROD001",
+      "productName": "测试商品1",
+      "quantity": 2
+    }
+  ]
+}
+```
+
+#### 根本原因
+
+`extractAllJsonKeyOrders` 函数只递归处理了嵌套对象的键顺序，**没有处理数组内对象元素的键顺序**。
+
+导致序列化时：
+- `products[0]`、`products[1]` 等路径没有对应的键顺序记录
+- 数组内的对象使用默认的字母排序
+
+#### 解决方案
+
+**1. 修改 `extractAllJsonKeyOrders` 函数** (ConfigPage.cpp:1746-1859)
+
+增加对数组值的识别和处理：
+
+```cpp
+void ConfigPage::extractAllJsonKeyOrders(const QString& jsonText, const QString& currentPath,
+                                         QMap<QString, QStringList>& orderMap)
+{
+    QStringList keys;
+    QMap<QString, QString> childObjectTexts; // 键 -> 子对象的 JSON 文本
+    QMap<QString, QString> childArrayTexts;  // 键 -> 子数组的 JSON 文本 ⭐ 新增
+
+    // ... 解析逻辑 ...
+
+    // 识别数组值并记录
+    if (c == '[') {
+        if (braceCount == 1 && bracketCount == 0 && foundColon && valueStart == -1) {
+            valueStart = i;
+            valueIsArray = true;  // ⭐ 标记为数组
+        }
+        bracketCount++;
+    } else if (c == ']') {
+        bracketCount--;
+        if (braceCount == 1 && bracketCount == 0 && valueStart != -1 && valueIsArray) {
+            // ⭐ 提取子数组的文本
+            QString childText = jsonText.mid(valueStart, i - valueStart + 1);
+            if (!currentKey.isEmpty()) {
+                childArrayTexts[currentKey] = childText;
+            }
+            valueStart = -1;
+        }
+    }
+
+    // ... 保存当前层级的键顺序 ...
+
+    // 递归处理子对象
+    for (auto it = childObjectTexts.constBegin(); it != childObjectTexts.constEnd(); ++it) {
+        QString childPath = currentPath.isEmpty() ? it.key() : currentPath + "." + it.key();
+        extractAllJsonKeyOrders(it.value(), childPath, orderMap);
+    }
+
+    // ⭐ 递归处理子数组中的对象元素
+    for (auto it = childArrayTexts.constBegin(); it != childArrayTexts.constEnd(); ++it) {
+        QString arrayPath = currentPath.isEmpty() ? it.key() : currentPath + "." + it.key();
+        extractArrayElementKeyOrders(it.value(), arrayPath, orderMap);
+    }
+}
+```
+
+**2. 新增 `extractArrayElementKeyOrders` 函数** (ConfigPage.cpp:1861-1924)
+
+提取数组中每个对象元素的键顺序：
+
+```cpp
+void ConfigPage::extractArrayElementKeyOrders(const QString& arrayText, const QString& arrayPath,
+                                               QMap<QString, QStringList>& orderMap)
+{
+    // 提取数组中每个对象元素的键顺序
+    int bracketCount = 0;
+    int braceCount = 0;
+    bool inString = false;
+    int elementStart = -1;
+    int elementIndex = 0;
+
+    for (int i = 0; i < arrayText.length(); ++i) {
+        QChar c = arrayText[i];
+        // ... 字符串和转义处理 ...
+
+        if (c == '{') {
+            if (bracketCount == 1 && braceCount == 0 && elementStart == -1) {
+                elementStart = i;  // 记录对象元素开始位置
+            }
+            braceCount++;
+        } else if (c == '}') {
+            braceCount--;
+            if (bracketCount == 1 && braceCount == 0 && elementStart != -1) {
+                // 提取对象元素并递归处理
+                QString elementText = arrayText.mid(elementStart, i - elementStart + 1);
+                QString elementPath = QString("%1[%2]").arg(arrayPath).arg(elementIndex);
+                extractAllJsonKeyOrders(elementText, elementPath, orderMap);  // ⭐ 递归
+                elementStart = -1;
+                elementIndex++;
+            }
+        }
+    }
+}
+```
+
+**3. 头文件声明** (ConfigPage.h:282-288)
+
+```cpp
+/**
+ * @brief 提取 JSON 数组中每个对象元素的键顺序
+ * @param arrayText 数组的 JSON 文本
+ * @param arrayPath 数组的路径
+ * @param orderMap 输出的键顺序映射
+ */
+void extractArrayElementKeyOrders(const QString& arrayText, const QString& arrayPath,
+                                   QMap<QString, QStringList>& orderMap);
+```
+
+#### 修复效果
+
+- ✅ **数组内对象键顺序保持不变**（`productId` → `productName` → `price` → `quantity`）
+- ✅ **支持多层嵌套数组**（如 `data.items[0].nested[1].value`）
+- ✅ **递归处理**：数组内对象的嵌套对象和嵌套数组也能正确保持顺序
+
+#### 技术亮点
+
+1. ✅ **递归设计**：`extractAllJsonKeyOrders` 和 `extractArrayElementKeyOrders` 相互递归调用
+2. ✅ **路径格式统一**：使用 `arrayName[index]` 格式（如 `products[0]`）
+3. ✅ **与现有序列化兼容**：`serializeJsonValueWithOrderMap` 已使用相同的路径格式查找键顺序
+
+#### 相关文件
+
+| 文件 | 行号 | 说明 |
+|-----|------|------|
+| `src/ui/ConfigPage.h` | 282-288 | 新增 `extractArrayElementKeyOrders` 声明 |
+| `src/ui/ConfigPage.cpp` | 1746-1859 | 修改 `extractAllJsonKeyOrders` 增加数组处理 |
+| `src/ui/ConfigPage.cpp` | 1861-1924 | 新增 `extractArrayElementKeyOrders` 实现 |
+
+---
+
+## ✅ 最新完成 (2025-12-12)
+
+### **配置文件保存优化 - 增量更新策略**
+
+#### 问题描述
+
+在组件模式下编辑并保存 JSON/YAML 文件后，返回源码模式发现：
+- ❌ JSON 对象的键顺序被重新排序（按字母顺序）
+- ❌ 原始空对象（`{}`）和 null 值丢失
+- ❌ 缩进和格式风格改变
+
+**问题示例**：
+
+```json
+// 原始文件
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "page": 1,
+    "filters": {
+      "status": [],
+      "timeRange": {
+        "start": "2025-12-01",
+        "extra": {}  // 空对象
+      }
+    },
+    "device": {
+      "params": null  // null 值
+    }
+  }
+}
+
+// 保存后变成（问题）
+{
+    "code": 200,
+    "data": {
+        "device": {
+            "params": ""  // null 变成空字符串
+        },
+        "filters": {
+            "status": [],
+            "timeRange": {
+                "start": "2025-12-01"
+                // extra 丢失
+            }
+        },
+        "page": 1
+    },
+    "message": "success"
+}
+```
+
+#### 根本原因
+
+1. **键顺序改变**：使用 `QJsonObject::fromVariantMap()` 重建 JSON 对象时，Qt 会按字母顺序排列键（JSON 标准允许，但用户体验差）
+2. **空值丢失**：空对象和 null 值在解析为表单控件后无对应组件，保存时无法恢复
+3. **格式丢失**：重建过程会丢失原始格式信息（注释、缩进风格等）
+
+#### 解决方案：增量更新策略
+
+**核心思路**：保存时读取原始 JSON 文档，仅更新被修改的值，保持原始结构不变。
+
+**实现步骤**：
+
+**1. 存储原始文档** (ConfigPage.h:260-261)
+
+```cpp
+private:
+    QString _originalContent;           // 原始文件内容
+    QJsonDocument _originalJsonDoc;     // 原始 JSON 文档（仅 JSON 格式）
+```
+
+**2. 打开文件时缓存** (ConfigPage.cpp:366-379)
+
+```cpp
+void ConfigPage::openConfigFile(const QString &filePath)
+{
+    // ... 读取文件内容 ...
+    QString content = in.readAll();
+
+    // 保存原始内容（用于增量更新）
+    _originalContent = content;
+
+    // 如果是 JSON 格式，解析并保存原始文档
+    QString format = detectConfigFormat(filePath);
+    if (format == "json") {
+        QJsonParseError parseError;
+        _originalJsonDoc = QJsonDocument::fromJson(content.toUtf8(), &parseError);
+        if (parseError.error != QJsonParseError::NoError) {
+            _originalJsonDoc = QJsonDocument();  // 解析失败时清空
+        }
+    } else {
+        _originalJsonDoc = QJsonDocument();  // 非 JSON 格式清空
+    }
+}
+```
+
+**3. 增量更新 JSON** (ConfigPage.cpp:1527-1593)
+
+```cpp
+QString ConfigPage::updateJsonInPlace(const QVariantMap& flatData)
+{
+    if (_originalJsonDoc.isNull() || !_originalJsonDoc.isObject()) {
+        // 没有原始文档，回退到重建方式
+        QJsonObject rootObject = buildNestedJsonObject(flatData);
+        QJsonDocument doc(rootObject);
+        return QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
+    }
+
+    // 复制原始 JSON 对象
+    QJsonObject rootObj = _originalJsonDoc.object();
+
+    // 遍历表单数据，更新对应路径的值
+    for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+        QString path = it.key();
+        QVariant value = it.value();
+        updateJsonValueByPath(rootObj, path, value);
+    }
+
+    // 生成更新后的 JSON 文本
+    QJsonDocument updatedDoc(rootObj);
+    return QString::fromUtf8(updatedDoc.toJson(QJsonDocument::Indented));
+}
+
+void ConfigPage::updateJsonValueByPath(QJsonObject& obj, const QString& path,
+                                       const QVariant& value)
+{
+    // 处理数组路径格式：products[0].productId
+    QRegularExpression arrayRegex("^([^\\[]+)\\[(\\d+)\\]\\.(.+)$");
+    QRegularExpressionMatch match = arrayRegex.match(path);
+
+    if (match.hasMatch()) {
+        // 数组路径处理
+        QString arrayName = match.captured(1);
+        int index = match.captured(2).toInt();
+        QString remainingPath = match.captured(3);
+
+        if (obj.contains(arrayName) && obj[arrayName].isArray()) {
+            QJsonArray arr = obj[arrayName].toArray();
+            if (index >= 0 && index < arr.size() && arr[index].isObject()) {
+                QJsonObject itemObj = arr[index].toObject();
+                updateJsonValueByPath(itemObj, remainingPath, value);
+                arr[index] = itemObj;
+                obj[arrayName] = arr;
+            }
+        }
+        return;
+    }
+
+    // 普通嵌套路径
+    QStringList keys = path.split('.');
+
+    if (keys.size() == 1) {
+        // 最后一级，直接设置值
+        obj[keys[0]] = QJsonValue::fromVariant(value);
+        return;
+    }
+
+    // 递归处理嵌套
+    QString firstKey = keys[0];
+    QString remainingPath = keys.mid(1).join('.');
+
+    if (obj.contains(firstKey) && obj[firstKey].isObject()) {
+        QJsonObject nestedObj = obj[firstKey].toObject();
+        updateJsonValueByPath(nestedObj, remainingPath, value);
+        obj[firstKey] = nestedObj;
+    }
+}
+```
+
+**4. 修改保存逻辑** (ConfigPage.cpp:1010-1125)
+
+```cpp
+void ConfigPage::collectFormAndSave()
+{
+    // ... 收集表单数据到 flatData ...
+
+    ParserFactory& factory = ParserFactory::instance();
+    ConfigFormat format = factory.detectFormat(_currentFilePath);
+
+    QString updatedContent;
+    bool success = false;
+
+    if (format == ConfigFormat::JSON) {
+        // JSON 格式：使用增量更新保持原始结构
+        updatedContent = updateJsonInPlace(flatData);
+        if (!updatedContent.isEmpty()) {
+            QFile file(_currentFilePath);
+            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream out(&file);
+                out.setCodec("UTF-8");
+                out << updatedContent;
+                file.close();
+                success = true;
+
+                // 更新原始文档
+                _originalContent = updatedContent;
+                QJsonParseError parseError;
+                _originalJsonDoc = QJsonDocument::fromJson(
+                    updatedContent.toUtf8(), &parseError);
+            }
+        }
+    } else if (format == ConfigFormat::YAML) {
+        // YAML 格式：使用增量更新
+        updatedContent = updateYamlInPlace(flatData);
+        // ... 同样的保存逻辑 ...
+    } else {
+        // INI 格式：使用原有方式
+        success = factory.save(_currentFilePath, flatData, format);
+    }
+}
+```
+
+**5. YAML 增量更新** (ConfigPage.cpp:1595-1665)
+
+```cpp
+QString ConfigPage::updateYamlInPlace(const QVariantMap& flatData)
+{
+#ifdef YAML_CPP_AVAILABLE
+    if (_originalContent.isEmpty()) {
+        return QString();
+    }
+
+    try {
+        // 解析原始 YAML
+        YAML::Node root = YAML::Load(_originalContent.toStdString());
+
+        // 更新值（遍历 flatData，按路径更新节点）
+        for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+            QString path = it.key();
+            QVariant value = it.value();
+
+            // 解析路径并更新
+            QStringList keys = path.split('.');
+            YAML::Node* current = &root;
+
+            for (int i = 0; i < keys.size() - 1; ++i) {
+                QString key = keys[i];
+                // 检查数组索引格式 key[index]
+                // ...
+                current = &(*current)[key.toStdString()];
+            }
+
+            // 设置最终值
+            QString lastKey = keys.last();
+            (*current)[lastKey.toStdString()] = value.toString().toStdString();
+        }
+
+        // 输出更新后的 YAML
+        YAML::Emitter emitter;
+        emitter << root;
+        return QString::fromStdString(emitter.c_str());
+
+    } catch (const YAML::Exception& e) {
+        qWarning() << "YAML update failed:" << e.what();
+        return _originalContent;
+    }
+#else
+    return _originalContent;
+#endif
+}
+```
+
+#### 修复效果
+
+- ✅ **键顺序保持不变**（`code, message, data`）
+- ✅ **空对象保留**（`extra: {}`）
+- ✅ **null 值保持**（`params: null`）
+- ✅ **缩进风格保持**（原样输出）
+- ✅ **仅修改用户编辑的值**
+
+#### 技术亮点
+
+1. ✅ **非侵入式更新**：只修改用户编辑的字段，其他字段完全保留
+2. ✅ **容错机制**：解析失败时自动回退到重建方式
+3. ✅ **格式通用**：JSON 和 YAML 均支持增量更新
+4. ✅ **数组支持**：支持数组路径（如 `products[0].name`）
+5. ✅ **递归更新**：支持任意深度的嵌套对象
+
+#### 注意事项
+
+1. ⚠️ 此方案仅对 JSON/YAML 有效，INI 格式仍使用重建方式
+2. ⚠️ 如果原始文档解析失败，会自动回退到重建方式
+3. ⚠️ YAML 的增量更新需要 `yaml-cpp` 库支持
+4. ⚠️ 组件模式下无法添加/删除顶层键，只能修改现有值
+
+#### 相关文件
+
+| 文件 | 行号 | 说明 |
+|-----|------|------|
+| `src/ui/ConfigPage.h` | 260-261 | 添加原始文档成员变量 |
+| `src/ui/ConfigPage.h` | 215-234 | 声明增量更新方法 |
+| `src/ui/ConfigPage.cpp` | 366-379 | 打开文件时缓存原始内容 |
+| `src/ui/ConfigPage.cpp` | 1010-1125 | 保存逻辑使用增量更新 |
+| `src/ui/ConfigPage.cpp` | 1127-1173 | collectFormToText 使用增量更新 |
+| `src/ui/ConfigPage.cpp` | 1527-1665 | 增量更新实现（JSON + YAML） |
 
 ---
 
@@ -713,5 +1182,5 @@ class YamlSyntaxHighlighter : public QSyntaxHighlighter {
 
 ---
 
-**最后更新**: 2025-11-30
+**最后更新**: 2025-12-13
 **文档版本**: v1.0

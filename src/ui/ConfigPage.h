@@ -10,6 +10,10 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 
+#ifdef YAML_CPP_AVAILABLE
+#include <yaml-cpp/yaml.h>
+#endif
+
 class ElaCentralStackedWidget;
 class ElaWidget;
 class ElaScrollPageArea;
@@ -143,6 +147,46 @@ private:
     QMap<QString, ConfigItem> parseConfigFile(const QString& filePath);
 
     /**
+     * @brief 递归展开 QVariant 为扁平化的 ConfigItem 映射
+     * @param prefix 当前键前缀
+     * @param value 当前值
+     * @param result 结果映射
+     */
+    void flattenVariantToConfigItems(const QString& prefix, const QVariant& value, QMap<QString, ConfigItem>& result);
+
+    /**
+     * @brief 从 QJsonDocument 解析为 ConfigItem 映射
+     * @param doc JSON 文档
+     * @return 解析后的配置项映射
+     */
+    QMap<QString, ConfigItem> parseJsonDocumentToConfigItems(const QJsonDocument& doc);
+
+    /**
+     * @brief 将 JSON 对象转换为 QVariantMap
+     * @param obj JSON 对象
+     * @param prefix 键前缀
+     * @return 转换后的 QVariantMap
+     */
+    QVariantMap jsonObjectToVariantMap(const QJsonObject& obj, const QString& prefix);
+
+#ifdef YAML_CPP_AVAILABLE
+    /**
+     * @brief 扁平化 YAML 节点为 QVariantMap
+     * @param node YAML 节点
+     * @param result 结果映射
+     * @param prefix 键前缀
+     */
+    void flattenYamlNode(const YAML::Node& node, QVariantMap& result, const QString& prefix);
+
+    /**
+     * @brief 将 YAML 节点转换为 QVariant
+     * @param node YAML 节点
+     * @return 转换后的 QVariant
+     */
+    QVariant yamlNodeToVariant(const YAML::Node& node);
+#endif
+
+    /**
      * @brief 构建表单界面（统一方法）
      * @param configData 配置数据
      */
@@ -220,6 +264,83 @@ private:
     QString updateJsonInPlace(const QVariantMap& flatData);
 
     /**
+     * @brief 序列化 JSON 对象，保持原始键顺序
+     * @param obj 要序列化的 JSON 对象
+     * @param originalText 原始 JSON 文本（用于提取键顺序）
+     * @return 序列化后的 JSON 文本
+     */
+    QString serializeJsonPreservingOrder(const QJsonObject& obj, const QString& originalText);
+
+    /**
+     * @brief 递归提取所有层级 JSON 对象的键顺序
+     * @param jsonText JSON 文本
+     * @param currentPath 当前对象路径
+     * @param orderMap 输出的键顺序映射（路径 -> 键顺序列表）
+     */
+    void extractAllJsonKeyOrders(const QString& jsonText, const QString& currentPath, QMap<QString, QStringList>& orderMap);
+
+    /**
+     * @brief 提取 JSON 数组中每个对象元素的键顺序
+     * @param arrayText 数组的 JSON 文本
+     * @param arrayPath 数组的路径
+     * @param orderMap 输出的键顺序映射
+     */
+    void extractArrayElementKeyOrders(const QString& arrayText, const QString& arrayPath, QMap<QString, QStringList>& orderMap);
+
+    /**
+     * @brief 使用键顺序映射序列化 JSON 对象
+     * @param obj JSON 对象
+     * @param path 当前对象路径
+     * @param orderMap 键顺序映射
+     * @param indent 缩进级别
+     * @return 序列化后的 JSON 文本
+     */
+    QString serializeJsonObjectWithOrderMap(const QJsonObject& obj, const QString& path,
+                                            const QMap<QString, QStringList>& orderMap, int indent);
+
+    /**
+     * @brief 使用键顺序映射序列化 JSON 值
+     * @param value JSON 值
+     * @param path 当前路径
+     * @param orderMap 键顺序映射
+     * @param indent 缩进级别
+     * @return 序列化后的文本
+     */
+    QString serializeJsonValueWithOrderMap(const QJsonValue& value, const QString& path,
+                                           const QMap<QString, QStringList>& orderMap, int indent);
+
+    /**
+     * @brief 从 JSON 文本中提取第一层键的顺序（兼容旧接口）
+     * @param jsonText JSON 文本
+     * @return 键名列表（按原始顺序）
+     */
+    QStringList extractJsonKeyOrder(const QString& jsonText);
+
+    /**
+     * @brief 按指定顺序序列化 JSON 对象（兼容旧接口）
+     * @param obj JSON 对象
+     * @param keyOrder 键顺序列表
+     * @param indent 缩进级别
+     * @return 序列化后的 JSON 文本
+     */
+    QString serializeJsonObjectWithOrder(const QJsonObject& obj, const QStringList& keyOrder, int indent);
+
+    /**
+     * @brief 序列化 JSON 值（兼容旧接口）
+     * @param value JSON 值
+     * @param indent 缩进级别
+     * @return 序列化后的文本
+     */
+    QString serializeJsonValue(const QJsonValue& value, int indent);
+
+    /**
+     * @brief 转义 JSON 字符串中的特殊字符
+     * @param str 原始字符串
+     * @return 转义后的字符串
+     */
+    QString escapeJsonString(const QString& str);
+
+    /**
      * @brief 在 JSON 对象中按路径更新值
      * @param obj JSON 对象
      * @param path 路径字符串（如 "data.filters.timeRange.start"）
@@ -228,11 +349,53 @@ private:
     void updateJsonValueByPath(QJsonObject& obj, const QString& path, const QVariant& value);
 
     /**
+     * @brief 解析 JSON 路径为段列表
+     * @param path 路径字符串（如 "data.list[0].config.enable"）
+     * @return 段列表（如 ["data", "list", "[0]", "config", "enable"]）
+     */
+    QStringList parseJsonPath(const QString& path);
+
+    /**
+     * @brief 根据路径段列表递归设置 JSON 值
+     * @param obj JSON 对象
+     * @param segments 路径段列表
+     * @param index 当前段索引
+     * @param value 要设置的值
+     */
+    void setJsonValueBySegments(QJsonObject& obj, const QStringList& segments, int index, const QVariant& value);
+
+    /**
      * @brief 在原始 YAML 内容中增量更新值
      * @param flatData 表单收集的扁平化数据
      * @return 更新后的 YAML 文本
      */
     QString updateYamlInPlace(const QVariantMap& flatData);
+
+#ifdef YAML_CPP_AVAILABLE
+    /**
+     * @brief 根据路径更新 YAML 节点
+     * @param root YAML 根节点
+     * @param path 路径字符串（如 "data.list[0].config.enable"）
+     * @param value 新值
+     */
+    void updateYamlNodeByPath(YAML::Node& root, const QString& path, const QVariant& value);
+
+    /**
+     * @brief 递归设置 YAML 节点值
+     * @param node 当前节点
+     * @param segments 路径段列表
+     * @param index 当前段索引
+     * @param value 要设置的值
+     */
+    void setYamlValue(YAML::Node& node, const QStringList& segments, int index, const QVariant& value);
+
+    /**
+     * @brief 设置 YAML 节点的最终值
+     * @param node YAML 节点
+     * @param value 要设置的值
+     */
+    void setYamlNodeValue(YAML::Node node, const QVariant& value);
+#endif
 
 private:
     // ========================================
