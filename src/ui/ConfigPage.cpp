@@ -1,5 +1,6 @@
 #include "ConfigPage.h"
 #include "MainWindow.h"
+#include "AddConfigItemDialog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -32,7 +33,9 @@
 #include "ElaScrollArea.h"
 #include "ElaScrollPageArea.h"
 #include "ElaTheme.h"
+#include "ElaContentDialog.h"
 #include "JsonParser.h"
+#include "utils/EncodingUtils.h"
 
 #ifdef YAML_CPP_AVAILABLE
 #include <yaml-cpp/yaml.h>
@@ -150,6 +153,12 @@ namespace Prism {
 
         // 底部按钮栏
         QHBoxLayout *buttonLayout = new QHBoxLayout();
+
+        // 左侧：添加新配置项按钮（仅在组件模式下可用）
+        _addItemButton = new ElaPushButton("添加新配置项", this);
+        _addItemButton->setEnabled(false);  // 默认禁用，打开文件后启用
+        buttonLayout->addWidget(_addItemButton);
+
         buttonLayout->addStretch();
 
         _validateButton = new ElaPushButton("验证格式", this);
@@ -220,6 +229,7 @@ namespace Prism {
         connect(_saveButton, &ElaPushButton::clicked, this, &ConfigPage::saveCurrentConfig);
         connect(_reloadButton, &ElaPushButton::clicked, this, &ConfigPage::reloadCurrentConfig);
         connect(_validateButton, &ElaPushButton::clicked, this, &ConfigPage::validateConfig);
+        connect(_addItemButton, &ElaPushButton::clicked, this, &ConfigPage::addNewConfigItem);
 
         // 主题变化
         connect(eTheme, &ElaTheme::themeModeChanged, this, &ConfigPage::onThemeChanged);
@@ -229,20 +239,119 @@ namespace Prism {
     {
         if (_currentMode == mode) return;
 
-        if (mode == EditMode::Form)
-        {
+        // 从源码模式切换到组件模式：自动保存
+        if (_currentMode == EditMode::Source && mode == EditMode::Form) {
+            if (_isModified && !_currentFilePath.isEmpty()) {
+                // 自动保存源码模式的修改
+                saveCurrentConfig();
+
+                ElaMessageBar::success(ElaMessageBarType::BottomRight, "自动保存",
+                                       "源码模式的修改已自动保存", 1500);
+
+                if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                    mainWin->appendLog("INFO", "切换到组件模式时自动保存了源码修改");
+                }
+            }
+
             // 切换到组件模式：从源码同步到表单
             syncSourceToForm();
             _editorStack->setCurrentIndex(1);
         }
-        else
-        {
-            // 切换到源码模式：从表单同步到源码
-            syncFormToSource();
+        // 从组件模式切换到源码模式：检查未保存修改
+        else if (_currentMode == EditMode::Form && mode == EditMode::Source) {
+            if (_isModified) {
+                // 使用 ElaContentDialog 弹框提醒用户
+                ElaContentDialog* confirmDialog = new ElaContentDialog(this);
+                confirmDialog->setWindowTitle("未保存的修改");
+                confirmDialog->setLeftButtonText("取消");
+                confirmDialog->setMiddleButtonText("丢弃修改");
+                confirmDialog->setRightButtonText("保存");
+
+                // 创建对话框内容
+                QWidget* contentWidget = new QWidget(confirmDialog);
+                QVBoxLayout* contentLayout = new QVBoxLayout(contentWidget);
+                contentLayout->setContentsMargins(20, 20, 20, 20);
+
+                ElaText* messageText = new ElaText(contentWidget);
+                messageText->setText("组件模式有未保存的修改。");
+                messageText->setTextPixelSize(15);
+
+                ElaText* hintText = new ElaText(contentWidget);
+                hintText->setText("• 保存：保存修改后切换到源码模式\n• 丢弃修改：放弃当前修改，切换到源码模式\n• 取消：留在组件模式继续编辑");
+                hintText->setTextPixelSize(12);
+
+                contentLayout->addWidget(messageText);
+                contentLayout->addSpacing(10);
+                contentLayout->addWidget(hintText);
+
+                confirmDialog->setCentralWidget(contentWidget);
+
+                // 用于记录用户选择
+                int userChoice = 0;  // 0=取消, 1=丢弃, 2=保存
+
+                // 取消按钮
+                connect(confirmDialog, &ElaContentDialog::leftButtonClicked, this, [&userChoice, confirmDialog]() {
+                    userChoice = 0;
+                    confirmDialog->close();
+                });
+
+                // 丢弃修改按钮
+                connect(confirmDialog, &ElaContentDialog::middleButtonClicked, this, [&userChoice, confirmDialog]() {
+                    userChoice = 1;
+                    confirmDialog->close();
+                });
+
+                // 保存按钮
+                connect(confirmDialog, &ElaContentDialog::rightButtonClicked, this, [&userChoice, confirmDialog]() {
+                    userChoice = 2;
+                    confirmDialog->close();
+                });
+
+                confirmDialog->exec();
+
+                // 根据用户选择执行操作
+                if (userChoice == 2) {
+                    // 保存后切换
+                    collectFormAndSave();
+                } else if (userChoice == 1) {
+                    // 丢弃修改，重新加载文件内容到编辑器
+                    if (!_currentFilePath.isEmpty()) {
+                        QFile file(_currentFilePath);
+                        if (file.open(QIODevice::ReadOnly)) {
+                            QByteArray rawData = file.readAll();
+                            file.close();
+                            QString content = EncodingUtils::autoDetectAndConvert(rawData);
+                            _configEditor->setPlainText(content);
+                            _originalContent = content;
+                        }
+                    }
+                    _isModified = false;
+                    _saveButton->setEnabled(false);
+
+                    if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                        mainWin->appendLog("INFO", "丢弃了组件模式的未保存修改");
+                    }
+                } else {
+                    // 取消切换，恢复单选按钮状态
+                    _sourceModeBtn->setChecked(false);
+                    _formModeBtn->setChecked(true);
+                    confirmDialog->deleteLater();
+                    return;
+                }
+
+                confirmDialog->deleteLater();
+            }
+
+            // 切换到源码模式
             _editorStack->setCurrentIndex(0);
         }
 
         _currentMode = mode;
+
+        // 更新按钮状态
+        _sourceModeBtn->setChecked(mode == EditMode::Source);
+        _formModeBtn->setChecked(mode == EditMode::Form);
+
         qDebug() << "切换编辑模式:" << (mode == EditMode::Source ? "源码" : "组件");
     }
 
@@ -405,7 +514,7 @@ namespace Prism {
     void ConfigPage::openConfigFile(const QString &filePath)
     {
         QFile file(filePath);
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        if (!file.open(QIODevice::ReadOnly))
         {
             ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
                                  QString("无法打开文件: %1").arg(filePath), 2000);
@@ -418,10 +527,12 @@ namespace Prism {
             return;
         }
 
-        QTextStream in(&file);
-        in.setCodec("UTF-8");
-        QString content = in.readAll();
+        // 读取原始字节数据，使用编码检测自动转换
+        QByteArray rawData = file.readAll();
         file.close();
+
+        // 自动检测编码并转换为 UTF-8
+        QString content = EncodingUtils::autoDetectAndConvert(rawData);
 
         // 保存原始内容（用于增量更新）
         _originalContent = content;
@@ -443,6 +554,7 @@ namespace Prism {
         _currentFormat = format;
         _isModified = false;
         _saveButton->setEnabled(false);
+        _addItemButton->setEnabled(true);  // 启用"添加新配置项"按钮
 
         // 如果当前是组件模式，同步到表单
         if (_currentMode == EditMode::Form)
@@ -701,6 +813,77 @@ namespace Prism {
             }
 
             qDebug() << "添加配置文件:" << filePath;
+        }
+    }
+
+    void ConfigPage::addNewConfigItem()
+    {
+        // 检查是否有打开的配置文件
+        if (_currentFilePath.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "提示",
+                                   "请先打开一个配置文件", 1500);
+            return;
+        }
+
+        // 检查是否在组件模式
+        if (_currentMode != EditMode::Form) {
+            ElaMessageBar::warning(ElaMessageBarType::BottomRight, "提示",
+                                   "请切换到组件模式后再添加配置项", 1500);
+            return;
+        }
+
+        // 收集当前文件的所有 sections
+        QStringList sections;
+        for (auto it = _formWidgetMap.constBegin(); it != _formWidgetMap.constEnd(); ++it) {
+            QString path = it.key();
+            int dotPos = path.indexOf('.');
+            if (dotPos != -1) {
+                QString section = path.left(dotPos);
+                if (!sections.contains(section)) {
+                    sections.append(section);
+                }
+            }
+        }
+
+        // 创建并显示对话框
+        AddConfigItemDialog dialog(this);
+        dialog.setSections(sections);
+
+        if (dialog.exec() == QDialog::Accepted) {
+            QString key = dialog.getKey();
+            ConfigValueType type = dialog.getType();
+            QString defaultValue = dialog.getDefaultValue();
+
+            // 检查键名是否已存在
+            if (_formWidgetMap.contains(key)) {
+                ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
+                                    QString("键名 \"%1\" 已存在").arg(key), 2000);
+                return;
+            }
+
+            // 创建 ConfigItem
+            ConfigItem item(defaultValue, type);
+
+            // 动态添加到表单
+            addConfigItemToForm(key, item);
+
+            // 标记为已修改
+            _isModified = true;
+            _saveButton->setEnabled(true);
+            if (!_currentFilePath.isEmpty()) {
+                emit configFileModified(_currentFilePath);
+            }
+
+            // 显示成功消息
+            ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
+                                   QString("已添加配置项: %1").arg(key), 1500);
+
+            // 添加日志
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("SUCCESS", QString("添加配置项: %1 = %2").arg(key, defaultValue));
+            }
+
+            qDebug() << "添加配置项:" << key << "=" << defaultValue;
         }
     }
 
@@ -1164,6 +1347,187 @@ namespace Prism {
         qDebug() << "构建表单界面成功，共" << groupedData.size() << "个分组," << configData.size() << "个配置项";
     }
 
+    void ConfigPage::addConfigItemToForm(const QString& key, const ConfigItem& item)
+    {
+        // 解析键名，确定分组
+        QString topLevelKey;
+        QString subKey;
+
+        // 检查是否是数组键格式（如 products[0].productId）
+        QRegularExpression arrayRegex("^([^\\[]+)\\[(\\d+)\\]\\.(.+)$");
+        QRegularExpressionMatch match = arrayRegex.match(key);
+
+        if (match.hasMatch()) {
+            // 数组键：分组名为 "arrayName[index]"
+            QString arrayName = match.captured(1);
+            QString index = match.captured(2);
+            topLevelKey = QString("%1[%2]").arg(arrayName, index);
+            subKey = match.captured(3);
+        } else {
+            // 普通键：使用第一个 "." 分隔
+            int dotPos = key.indexOf('.');
+            if (dotPos != -1) {
+                topLevelKey = key.left(dotPos);
+                subKey = key.mid(dotPos + 1);
+            } else {
+                topLevelKey = "General";
+                subKey = key;
+            }
+        }
+
+        // 查找或创建对应的分组卡片
+        QWidget* targetCard = nullptr;
+        QVBoxLayout* targetCardLayout = nullptr;
+
+        // 遍历现有卡片，查找匹配的分组
+        for (QWidget* card : _formCards) {
+            QVBoxLayout* cardLayout = qobject_cast<QVBoxLayout*>(card->layout());
+            if (cardLayout && cardLayout->count() > 0) {
+                // 获取卡片的标题（第一个控件）
+                ElaText* titleLabel = qobject_cast<ElaText*>(cardLayout->itemAt(0)->widget());
+                if (titleLabel && titleLabel->text() == topLevelKey) {
+                    targetCard = card;
+                    targetCardLayout = cardLayout;
+                    break;
+                }
+            }
+        }
+
+        // 如果没有找到对应的卡片，创建新卡片
+        if (!targetCard) {
+            targetCard = new QWidget(_formContainer);
+            targetCard->setObjectName("ConfigCard");
+            targetCard->setStyleSheet(getCardStyleSheet());
+            _formCards.append(targetCard);
+
+            targetCardLayout = new QVBoxLayout(targetCard);
+            targetCardLayout->setContentsMargins(15, 12, 15, 12);
+            targetCardLayout->setSpacing(8);
+
+            // 分组标题
+            ElaText* titleLabel = new ElaText(topLevelKey, targetCard);
+            titleLabel->setTextPixelSize(15);
+            titleLabel->setTextStyle(ElaTextType::Subtitle);
+            targetCardLayout->addWidget(titleLabel);
+
+            // 添加分隔线效果
+            targetCardLayout->addSpacing(4);
+
+            // 添加卡片到表单布局（在 stretch 之前）
+            _formLayout->insertWidget(_formLayout->count() - 1, targetCard);
+        }
+
+        // 创建配置项行
+        QWidget* rowWidget = new QWidget(targetCard);
+        QHBoxLayout* rowLayout = new QHBoxLayout(rowWidget);
+        rowLayout->setContentsMargins(0, 4, 0, 4);
+        rowLayout->setSpacing(12);
+
+        // 左侧：键名标签（显示子键）
+        ElaText* keyLabel = new ElaText(subKey, rowWidget);
+        keyLabel->setTextPixelSize(13);
+        rowLayout->addWidget(keyLabel);
+        rowLayout->addStretch();
+
+        // 右侧：根据类型创建不同的控件
+        QWidget* valueWidget = nullptr;
+
+        switch (item.type) {
+            case ConfigValueType::Boolean: {
+                ElaToggleSwitch* toggleSwitch = new ElaToggleSwitch(rowWidget);
+                QString lowerValue = item.value.toLower();
+                bool isTrue = (lowerValue == "true" || lowerValue == "yes" ||
+                               lowerValue == "on" || lowerValue == "1");
+                toggleSwitch->setIsToggled(isTrue);
+
+                connect(toggleSwitch, &ElaToggleSwitch::toggled, this, [this]() {
+                    _isModified = true;
+                    _saveButton->setEnabled(true);
+                    if (!_currentFilePath.isEmpty()) {
+                        emit configFileModified(_currentFilePath);
+                    }
+                });
+
+                valueWidget = toggleSwitch;
+                break;
+            }
+
+            case ConfigValueType::Integer: {
+                ElaSpinBox* spinBox = new ElaSpinBox(rowWidget);
+                spinBox->setMinimum(-2147483648);
+                spinBox->setMaximum(2147483647);
+                spinBox->setValue(item.value.toInt());
+                spinBox->setFixedHeight(32);
+                spinBox->setFixedWidth(150);
+
+                connect(spinBox, QOverload<int>::of(&ElaSpinBox::valueChanged),
+                        this, [this]() {
+                            _isModified = true;
+                            _saveButton->setEnabled(true);
+                            if (!_currentFilePath.isEmpty()) {
+                                emit configFileModified(_currentFilePath);
+                            }
+                        });
+
+                valueWidget = spinBox;
+                break;
+            }
+
+            case ConfigValueType::Double: {
+                ElaDoubleSpinBox* doubleSpinBox = new ElaDoubleSpinBox(rowWidget);
+                doubleSpinBox->setMinimum(-1e10);
+                doubleSpinBox->setMaximum(1e10);
+                doubleSpinBox->setDecimals(6);
+                doubleSpinBox->setValue(item.value.toDouble());
+                doubleSpinBox->setFixedHeight(32);
+                doubleSpinBox->setFixedWidth(150);
+
+                connect(doubleSpinBox, QOverload<double>::of(&ElaDoubleSpinBox::valueChanged),
+                        this, [this]() {
+                            _isModified = true;
+                            _saveButton->setEnabled(true);
+                            if (!_currentFilePath.isEmpty()) {
+                                emit configFileModified(_currentFilePath);
+                            }
+                        });
+
+                valueWidget = doubleSpinBox;
+                break;
+            }
+
+            case ConfigValueType::String:
+            case ConfigValueType::Array:
+            default: {
+                ElaLineEdit* lineEdit = new ElaLineEdit(rowWidget);
+                lineEdit->setText(item.value);
+                lineEdit->setFixedHeight(32);
+                lineEdit->setFixedWidth(350);
+
+                connect(lineEdit, &ElaLineEdit::textChanged, this, [this]() {
+                    _isModified = true;
+                    _saveButton->setEnabled(true);
+                    if (!_currentFilePath.isEmpty()) {
+                        emit configFileModified(_currentFilePath);
+                    }
+                });
+
+                valueWidget = lineEdit;
+                break;
+            }
+        }
+
+        // 添加控件到布局
+        rowLayout->addWidget(valueWidget);
+
+        // 添加行到卡片
+        targetCardLayout->addWidget(rowWidget);
+
+        // 保存控件映射
+        _formWidgetMap[key] = valueWidget;
+
+        qDebug() << "动态添加配置项到表单:" << key << "=" << item.value;
+    }
+
     void ConfigPage::collectFormAndSave()
     {
         if (_currentFilePath.isEmpty()) {
@@ -1240,8 +1604,24 @@ namespace Prism {
                     _originalContent = updatedContent;
                 }
             }
+        } else if (format == ConfigFormat::INI) {
+            // INI 格式：使用增量更新保持原始结构和顺序
+            updatedContent = updateIniInPlace(flatData);
+            if (!updatedContent.isEmpty()) {
+                QFile file(_currentFilePath);
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out.setCodec("UTF-8");
+                    out << updatedContent;
+                    file.close();
+                    success = true;
+
+                    // 更新原始内容
+                    _originalContent = updatedContent;
+                }
+            }
         } else {
-            // INI 格式：使用原有方式
+            // 其他格式：使用原有方式
             QVariantMap configData = flatData;
             success = factory.save(_currentFilePath, configData, format);
         }
@@ -2232,6 +2612,201 @@ namespace Prism {
 #else
         return _originalContent;
 #endif
+    }
+
+    QString ConfigPage::updateIniInPlace(const QVariantMap& flatData)
+    {
+        if (_originalContent.isEmpty()) {
+            return QString();
+        }
+
+        // 解析原始 INI 内容，保持行顺序和注释
+        QStringList lines = _originalContent.split('\n');
+        QMap<QString, QString> updates;  // 路径 -> 新值
+
+        // 准备更新数据（将扁平化路径转换为 section.key 格式）
+        for (auto it = flatData.constBegin(); it != flatData.constEnd(); ++it) {
+            QString path = it.key();
+            QVariant value = it.value();
+
+            // 转换值为字符串
+            QString valueStr;
+            if (value.type() == QVariant::Bool) {
+                valueStr = value.toBool() ? "true" : "false";
+            } else if (value.type() == QVariant::Int || value.type() == QVariant::LongLong) {
+                valueStr = QString::number(value.toInt());
+            } else if (value.type() == QVariant::Double) {
+                valueStr = QString::number(value.toDouble());
+            } else if (value.type() == QVariant::StringList) {
+                // QStringList 类型：用逗号连接
+                QStringList list = value.toStringList();
+                valueStr = list.join(", ");
+            } else if (value.type() == QVariant::List) {
+                // QVariantList 类型：转换为逗号分隔的字符串
+                QVariantList list = value.toList();
+                QStringList strList;
+                for (const QVariant& item : list) {
+                    strList.append(item.toString());
+                }
+                valueStr = strList.join(", ");
+            } else {
+                valueStr = value.toString();
+            }
+
+            updates[path] = valueStr;
+        }
+
+        // 逐行处理，更新对应的值
+        QString currentSection;
+        QString result;
+
+        for (int i = 0; i < lines.size(); ++i) {
+            QString line = lines[i];
+            QString trimmedLine = line.trimmed();
+
+            // 检查是否是 section 标题
+            if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) {
+                currentSection = trimmedLine.mid(1, trimmedLine.length() - 2);
+                result += line;
+                if (i < lines.size() - 1) result += '\n';
+                continue;
+            }
+
+            // 检查是否是注释或空行
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith('#') || trimmedLine.startsWith(';')) {
+                result += line;
+                if (i < lines.size() - 1) result += '\n';
+                continue;
+            }
+
+            // 检查是否是键值对
+            int equalPos = line.indexOf('=');
+            if (equalPos > 0) {
+                QString key = line.left(equalPos).trimmed();
+                QString oldValue = line.mid(equalPos + 1).trimmed();
+
+                // 构建完整路径
+                QString fullPath = currentSection.isEmpty() ? key : currentSection + "." + key;
+
+                // 检查是否需要更新
+                if (updates.contains(fullPath)) {
+                    QString newValue = updates[fullPath];
+                    // 保持原始缩进
+                    QString indent = line.left(line.indexOf(key));
+                    result += indent + key + " = " + newValue;
+                    if (i < lines.size() - 1) result += '\n';
+                    updates.remove(fullPath);  // 标记为已处理
+                } else {
+                    result += line;
+                    if (i < lines.size() - 1) result += '\n';
+                }
+            } else {
+                result += line;
+                if (i < lines.size() - 1) result += '\n';
+            }
+        }
+
+        // 处理新增的键值对（在原文件中不存在的）
+        if (!updates.isEmpty()) {
+            // 按 section 分组
+            QMap<QString, QStringList> newKeysBySection;
+            for (auto it = updates.constBegin(); it != updates.constEnd(); ++it) {
+                QString path = it.key();
+                QString value = it.value();
+
+                int dotPos = path.indexOf('.');
+                QString section;
+                QString key;
+
+                if (dotPos != -1) {
+                    section = path.left(dotPos);
+                    key = path.mid(dotPos + 1);
+                } else {
+                    section = "";  // 无 section
+                    key = path;
+                }
+
+                newKeysBySection[section].append(key + " = " + value);
+            }
+
+            // 重新解析结果，将新键值对插入到对应的 section 内部
+            QStringList resultLines = result.split('\n');
+            result.clear();
+
+            QString currentSection;
+            int lastSectionEndIndex = -1;
+            QMap<QString, int> sectionEndIndices;  // section 名称 -> 该 section 最后一行的索引
+
+            // 第一遍：找到每个 section 的结束位置
+            for (int i = 0; i < resultLines.size(); ++i) {
+                QString line = resultLines[i];
+                QString trimmedLine = line.trimmed();
+
+                if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) {
+                    // 保存上一个 section 的结束位置
+                    if (!currentSection.isEmpty()) {
+                        sectionEndIndices[currentSection] = i - 1;
+                    }
+                    currentSection = trimmedLine.mid(1, trimmedLine.length() - 2);
+                } else if (i == resultLines.size() - 1 && !currentSection.isEmpty()) {
+                    // 最后一个 section 的结束位置
+                    sectionEndIndices[currentSection] = i;
+                }
+            }
+
+            // 第二遍：插入新键值对到对应的 section
+            currentSection.clear();
+
+            for (int i = 0; i < resultLines.size(); ++i) {
+                QString line = resultLines[i];
+                QString trimmedLine = line.trimmed();
+
+                // 检查是否是 section 标题
+                if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) {
+                    // 在新 section 开始前，检查上一个 section 是否需要插入新键值对
+                    if (!currentSection.isEmpty() && newKeysBySection.contains(currentSection)) {
+                        // 插入新键值对到上一个 section 的末尾
+                        for (const QString& keyValue : newKeysBySection[currentSection]) {
+                            result += keyValue + '\n';
+                        }
+                        newKeysBySection.remove(currentSection);  // 标记为已处理
+                    }
+
+                    currentSection = trimmedLine.mid(1, trimmedLine.length() - 2);
+                }
+
+                result += line;
+                if (i < resultLines.size() - 1) {
+                    result += '\n';
+                }
+            }
+
+            // 处理最后一个 section 的新增键值对
+            if (!currentSection.isEmpty() && newKeysBySection.contains(currentSection)) {
+                const QStringList& keyValues = newKeysBySection[currentSection];
+                for (int j = 0; j < keyValues.size(); ++j) {
+                    result += '\n' + keyValues[j];
+                }
+                newKeysBySection.remove(currentSection);
+            }
+
+            // 处理不存在的 section（需要创建新 section）
+            for (auto it = newKeysBySection.constBegin(); it != newKeysBySection.constEnd(); ++it) {
+                QString section = it.key();
+                const QStringList& keys = it.value();
+
+                if (!section.isEmpty()) {
+                    // 添加新 section（只用一个空行分隔）
+                    result += "\n\n[" + section + "]";
+                    for (const QString& keyValue : keys) {
+                        result += '\n' + keyValue;
+                    }
+                }
+                // 注意：不再支持无 section 的键值对
+            }
+        }
+
+        return result;
     }
 
 #ifdef YAML_CPP_AVAILABLE

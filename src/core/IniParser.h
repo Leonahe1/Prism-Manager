@@ -1,13 +1,13 @@
 #pragma once
 
 #include "ConfigParser.h"
-#include <QSettings>
+#include <QVariant>
 
 namespace Prism {
 
 /**
  * @brief INI 格式解析器
- * 使用 Qt 的 QSettings 实现
+ * 手动解析 INI 文件，支持 UTF-8 编码和中文
  */
 class IniParser : public ConfigParser {
 public:
@@ -20,8 +20,12 @@ public:
     ConfigFormat getFormat() const override { return ConfigFormat::INI; }
 
 private:
-    // 递归读取 QSettings 的所有键值对
-    void readAllKeys(QSettings& settings, QVariantMap& map, const QString& prefix = QString());
+    /**
+     * @brief 解析值字符串，推断类型
+     * @param value 值字符串
+     * @return 推断类型后的 QVariant
+     */
+    QVariant parseValue(const QString& value);
 };
 
 } // namespace Prism

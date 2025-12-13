@@ -29,6 +29,8 @@ set(PRISM_SOURCES
     ui/BasePage.cpp
     ui/ConfigPage.h
     ui/ConfigPage.cpp
+    ui/AddConfigItemDialog.h
+    ui/AddConfigItemDialog.cpp
     ui/ProcessPage.h
     ui/ProcessPage.cpp
     # Utils
