@@ -9,6 +9,9 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QProcess>
 #include <QTextStream>
 #include <QDebug>
 #include <QHeaderView>
@@ -34,6 +37,11 @@
 #include "ElaScrollPageArea.h"
 #include "ElaTheme.h"
 #include "ElaContentDialog.h"
+#include "ElaMenu.h"
+
+#include <QDesktopServices>
+#include <QUrl>
+#include <QInputDialog>
 #include "JsonParser.h"
 #include "utils/EncodingUtils.h"
 
@@ -82,6 +90,7 @@ namespace Prism {
         _configTreeView->setHeaderHidden(false);
         _configTreeView->header()->resizeSection(0, 190);
         _configTreeView->header()->resizeSection(1, QHeaderView::ResizeToContents);
+        _configTreeView->setContextMenuPolicy(Qt::CustomContextMenu);  // 启用右键菜单
         leftLayout->addWidget(_configTreeView);
 
         // 添加文件按钮
@@ -230,6 +239,10 @@ namespace Prism {
         connect(_reloadButton, &ElaPushButton::clicked, this, &ConfigPage::reloadCurrentConfig);
         connect(_validateButton, &ElaPushButton::clicked, this, &ConfigPage::validateConfig);
         connect(_addItemButton, &ElaPushButton::clicked, this, &ConfigPage::addNewConfigItem);
+
+        // 右键菜单
+        connect(_configTreeView, &ElaTreeView::customContextMenuRequested,
+                this, &ConfigPage::onTreeViewContextMenu);
 
         // 主题变化
         connect(eTheme, &ElaTheme::themeModeChanged, this, &ConfigPage::onThemeChanged);
@@ -2952,4 +2965,326 @@ namespace Prism {
         }
     }
 #endif
+
+    // ========================================
+    // 右键菜单功能实现
+    // ========================================
+
+    void ConfigPage::onTreeViewContextMenu(const QPoint& pos)
+    {
+        QModelIndex index = _configTreeView->indexAt(pos);
+        if (!index.isValid()) {
+            return;
+        }
+
+        // 获取选中的文件路径
+        QString filePath = _treeModel->itemFromIndex(index.siblingAtColumn(0))->data(Qt::UserRole).toString();
+        if (filePath.isEmpty()) {
+            return;
+        }
+
+        _contextMenuFilePath = filePath;
+
+        // 创建右键菜单
+        ElaMenu* menu = new ElaMenu(this);
+        menu->setMenuItemHeight(28);
+
+        // 打开
+        QAction* openAction = menu->addElaIconAction(ElaIconType::FolderOpen, "打开");
+        connect(openAction, &QAction::triggered, this, [this]() {
+            openConfigFile(_contextMenuFilePath);
+        });
+
+        // 在资源管理器中显示
+        QAction* explorerAction = menu->addElaIconAction(ElaIconType::Folder, "在资源管理器中显示");
+        connect(explorerAction, &QAction::triggered, this, &ConfigPage::onOpenInExplorer);
+
+        menu->addSeparator();
+
+        // 备份
+        QAction* backupAction = menu->addElaIconAction(ElaIconType::Copy, "备份");
+        connect(backupAction, &QAction::triggered, this, &ConfigPage::onBackupFile);
+
+        // 重命名
+        QAction* renameAction = menu->addElaIconAction(ElaIconType::PenToSquare, "重命名");
+        connect(renameAction, &QAction::triggered, this, &ConfigPage::onRenameFile);
+
+        menu->addSeparator();
+
+        // 从列表移除
+        QAction* removeAction = menu->addElaIconAction(ElaIconType::CircleMinus, "从列表移除");
+        connect(removeAction, &QAction::triggered, this, &ConfigPage::onRemoveFromList);
+
+        // 删除文件
+        QAction* deleteAction = menu->addElaIconAction(ElaIconType::Trash, "删除文件");
+        connect(deleteAction, &QAction::triggered, this, &ConfigPage::onDeleteFile);
+
+        // 显示菜单
+        menu->exec(_configTreeView->viewport()->mapToGlobal(pos));
+        menu->deleteLater();
+    }
+
+    void ConfigPage::onOpenInExplorer()
+    {
+        if (_contextMenuFilePath.isEmpty()) {
+            return;
+        }
+
+        QFileInfo fileInfo(_contextMenuFilePath);
+        QString folderPath = fileInfo.absolutePath();
+
+#ifdef Q_OS_WIN
+        // Windows: 使用 explorer 并选中文件
+        QProcess::startDetached("explorer", QStringList() << "/select," << QDir::toNativeSeparators(_contextMenuFilePath));
+#else
+        // Linux/Mac: 打开文件所在目录
+        QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
+#endif
+
+        if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+            mainWin->appendLog("INFO", QString("在资源管理器中打开: %1").arg(folderPath));
+        }
+    }
+
+    void ConfigPage::onBackupFile()
+    {
+        if (_contextMenuFilePath.isEmpty()) {
+            return;
+        }
+
+        QFileInfo fileInfo(_contextMenuFilePath);
+        QString baseName = fileInfo.completeBaseName();
+        QString suffix = fileInfo.suffix();
+        QString dirPath = fileInfo.absolutePath();
+
+        // 生成备份文件名（序号备份）
+        QString backupPath;
+        int backupNum = 1;
+
+        // 查找下一个可用的备份序号
+        while (true) {
+            if (backupNum == 1) {
+                backupPath = QString("%1/%2.%3.bak").arg(dirPath, baseName, suffix);
+            } else {
+                backupPath = QString("%1/%2.%3.bak.%4").arg(dirPath, baseName, suffix).arg(backupNum);
+            }
+
+            if (!QFile::exists(backupPath)) {
+                break;
+            }
+            backupNum++;
+        }
+
+        // 复制文件
+        if (QFile::copy(_contextMenuFilePath, backupPath)) {
+            QString backupFileName = QFileInfo(backupPath).fileName();
+            ElaMessageBar::success(ElaMessageBarType::BottomRight, "备份成功",
+                                   QString("已创建备份: %1").arg(backupFileName), 2000);
+
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("SUCCESS", QString("备份文件: %1 -> %2").arg(fileInfo.fileName(), backupFileName));
+            }
+        } else {
+            ElaMessageBar::error(ElaMessageBarType::BottomRight, "备份失败",
+                                 "无法创建备份文件", 2000);
+
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("ERROR", QString("备份失败: %1").arg(_contextMenuFilePath));
+            }
+        }
+    }
+
+    void ConfigPage::onRenameFile()
+    {
+        if (_contextMenuFilePath.isEmpty()) {
+            return;
+        }
+
+        QFileInfo fileInfo(_contextMenuFilePath);
+        QString oldFileName = fileInfo.fileName();
+
+        // 弹出输入对话框
+        bool ok;
+        QString newFileName = QInputDialog::getText(this, "重命名文件",
+                                                     "请输入新文件名:",
+                                                     QLineEdit::Normal,
+                                                     oldFileName, &ok);
+
+        if (!ok || newFileName.isEmpty() || newFileName == oldFileName) {
+            return;
+        }
+
+        // 构建新路径
+        QString newFilePath = fileInfo.absolutePath() + "/" + newFileName;
+
+        // 检查新文件名是否已存在
+        if (QFile::exists(newFilePath)) {
+            ElaMessageBar::error(ElaMessageBarType::BottomRight, "重命名失败",
+                                 "目标文件名已存在", 2000);
+            return;
+        }
+
+        // 重命名文件
+        if (QFile::rename(_contextMenuFilePath, newFilePath)) {
+            // 更新配置文件列表
+            int index = _currentConfigFiles.indexOf(_contextMenuFilePath);
+            if (index != -1) {
+                _currentConfigFiles[index] = newFilePath;
+            }
+
+            // 如果当前打开的就是这个文件，更新路径
+            if (_currentFilePath == _contextMenuFilePath) {
+                _currentFilePath = newFilePath;
+            }
+
+            // 刷新树视图
+            loadConfigFiles(_currentConfigFiles);
+
+            ElaMessageBar::success(ElaMessageBarType::BottomRight, "重命名成功",
+                                   QString("已重命名为: %1").arg(newFileName), 2000);
+
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("SUCCESS", QString("重命名文件: %1 -> %2").arg(oldFileName, newFileName));
+            }
+        } else {
+            ElaMessageBar::error(ElaMessageBarType::BottomRight, "重命名失败",
+                                 "无法重命名文件", 2000);
+
+            if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                mainWin->appendLog("ERROR", QString("重命名失败: %1").arg(_contextMenuFilePath));
+            }
+        }
+    }
+
+    void ConfigPage::onRemoveFromList()
+    {
+        if (_contextMenuFilePath.isEmpty()) {
+            return;
+        }
+
+        QString fileName = QFileInfo(_contextMenuFilePath).fileName();
+
+        // 从列表中移除
+        _currentConfigFiles.removeAll(_contextMenuFilePath);
+        _filePathToFormat.remove(_contextMenuFilePath);
+
+        // 如果当前打开的就是这个文件，清空编辑器
+        if (_currentFilePath == _contextMenuFilePath) {
+            _currentFilePath.clear();
+            _currentFormat.clear();
+            _configEditor->clear();
+            _isModified = false;
+            _saveButton->setEnabled(false);
+            _addItemButton->setEnabled(false);
+            clearFormWidgets();
+        }
+
+        // 刷新树视图
+        loadConfigFiles(_currentConfigFiles);
+
+        // 发射信号通知 MainWindow
+        emit configFileRemoved(_contextMenuFilePath);
+
+        ElaMessageBar::success(ElaMessageBarType::BottomRight, "移除成功",
+                               QString("已从列表移除: %1").arg(fileName), 2000);
+
+        if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+            mainWin->appendLog("INFO", QString("从列表移除配置文件: %1（源文件未删除）").arg(fileName));
+        }
+    }
+
+    void ConfigPage::onDeleteFile()
+    {
+        if (_contextMenuFilePath.isEmpty()) {
+            return;
+        }
+
+        QString fileName = QFileInfo(_contextMenuFilePath).fileName();
+
+        // 使用 ElaContentDialog 进行二次确认
+        ElaContentDialog* confirmDialog = new ElaContentDialog(this);
+        confirmDialog->setWindowTitle("删除确认");
+        confirmDialog->setLeftButtonText("取消");
+        confirmDialog->setMiddleButtonText("");  // 隐藏中间按钮
+        confirmDialog->setRightButtonText("删除");
+
+        // 创建对话框内容
+        QWidget* contentWidget = new QWidget(confirmDialog);
+        QVBoxLayout* contentLayout = new QVBoxLayout(contentWidget);
+        contentLayout->setContentsMargins(20, 20, 20, 20);
+
+        ElaText* messageText = new ElaText(contentWidget);
+        messageText->setText(QString("确定要删除文件 \"%1\" 吗？").arg(fileName));
+        messageText->setTextPixelSize(15);
+
+        ElaText* warningText = new ElaText(contentWidget);
+        warningText->setText("⚠ 此操作将永久删除源文件，无法恢复！");
+        warningText->setTextPixelSize(12);
+
+        contentLayout->addWidget(messageText);
+        contentLayout->addSpacing(10);
+        contentLayout->addWidget(warningText);
+
+        confirmDialog->setCentralWidget(contentWidget);
+
+        // 用于记录用户选择
+        bool confirmed = false;
+
+        // 取消按钮
+        connect(confirmDialog, &ElaContentDialog::leftButtonClicked, this, [&confirmed, confirmDialog]() {
+            confirmed = false;
+            confirmDialog->close();
+        });
+
+        // 删除按钮
+        connect(confirmDialog, &ElaContentDialog::rightButtonClicked, this, [&confirmed, confirmDialog]() {
+            confirmed = true;
+            confirmDialog->close();
+        });
+
+        confirmDialog->exec();
+
+        if (confirmed) {
+            // 删除文件
+            if (QFile::remove(_contextMenuFilePath)) {
+                // 从列表中移除
+                _currentConfigFiles.removeAll(_contextMenuFilePath);
+                _filePathToFormat.remove(_contextMenuFilePath);
+
+                // 如果当前打开的就是这个文件，清空编辑器
+                if (_currentFilePath == _contextMenuFilePath) {
+                    _currentFilePath.clear();
+                    _currentFormat.clear();
+                    _configEditor->clear();
+                    _isModified = false;
+                    _saveButton->setEnabled(false);
+                    _addItemButton->setEnabled(false);
+                    clearFormWidgets();
+                }
+
+                // 刷新树视图
+                loadConfigFiles(_currentConfigFiles);
+
+                // 发射信号通知 MainWindow
+                emit configFileDeleted(_contextMenuFilePath);
+
+                ElaMessageBar::success(ElaMessageBarType::BottomRight, "删除成功",
+                                       QString("已删除: %1").arg(fileName), 2000);
+
+                if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                    mainWin->appendLog("WARNING", QString("已删除配置文件: %1").arg(_contextMenuFilePath));
+                }
+            } else {
+                ElaMessageBar::error(ElaMessageBarType::BottomRight, "删除失败",
+                                     "无法删除文件，可能被占用或权限不足", 2000);
+
+                if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
+                    mainWin->appendLog("ERROR", QString("删除失败: %1").arg(_contextMenuFilePath));
+                }
+            }
+        }
+
+        confirmDialog->deleteLater();
+    }
+
 } // namespace Prism

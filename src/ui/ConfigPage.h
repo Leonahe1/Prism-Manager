@@ -108,7 +108,20 @@ public slots:
 signals:
     void configFileModified(const QString& filePath);
     void configFileSaved(const QString& filePath);
-    void configFileAdded(const QString& filePath);  // 新增：通知添加了新配置文件
+    void configFileAdded(const QString& filePath);
+    void configFileRemoved(const QString& filePath);  // 通知从列表移除了配置文件
+    void configFileDeleted(const QString& filePath);  // 通知删除了配置文件
+
+private slots:
+    // ========================================
+    // 右键菜单槽函数
+    // ========================================
+    void onTreeViewContextMenu(const QPoint& pos);
+    void onOpenInExplorer();
+    void onBackupFile();
+    void onRenameFile();
+    void onRemoveFromList();
+    void onDeleteFile();
 
 private:
     // ========================================
@@ -461,6 +474,9 @@ private:
     // 原始文档内容（用于保持保存时的结构不变）
     QString _originalContent;           // 原始文件内容
     QJsonDocument _originalJsonDoc;     // 原始 JSON 文档（仅 JSON 格式）
+
+    // 右键菜单相关
+    QString _contextMenuFilePath;       // 右键菜单选中的文件路径
 };
 
 } // namespace Prism

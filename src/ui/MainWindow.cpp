@@ -619,6 +619,7 @@ namespace Prism {
 
         // 创建确认对话框
         ElaContentDialog *confirmDialog = new ElaContentDialog(this);
+        confirmDialog->setMinimumHeight(200);
         confirmDialog->setWindowTitle("移除项目");
         confirmDialog->setLeftButtonText("取消");
         confirmDialog->setMiddleButtonText("仅关闭");
