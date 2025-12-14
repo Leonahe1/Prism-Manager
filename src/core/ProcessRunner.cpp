@@ -1,7 +1,7 @@
 #include "ProcessRunner.h"
 #include <QTextCodec>
 #include <QDebug>
-
+#include "utils/EncodingUtils.h"
 namespace Prism {
 
 ProcessRunner::ProcessRunner(QObject* parent)
@@ -62,18 +62,15 @@ void ProcessRunner::stop(bool forceKill) {
     qDebug() << "[ProcessRunner] Stopping process (forceKill=" << forceKill << ")";
 
     if (forceKill) {
+        // 强制杀死进程
         m_process->kill();
+        setState(ProcessState::Killed);
     } else {
+        // 优雅终止：发送 terminate 信号
         m_process->terminate();
-        // 等待 3 秒后强制杀死
-        if (!m_process->waitForFinished(3000)) {
-            qWarning() << "[ProcessRunner] Process did not terminate gracefully, killing...";
-            m_process->kill();
-            m_process->waitForFinished(1000);
-        }
+        // 注意：不在这里阻塞等待，让 finished 信号自然触发
+        // 如果需要超时强制杀死，应该由调用者使用 QTimer 异步处理
     }
-
-    setState(ProcessState::Killed);
 }
 
 bool ProcessRunner::isRunning() const {
@@ -91,7 +88,8 @@ bool ProcessRunner::waitForFinished(int msecs) {
 void ProcessRunner::onReadyReadStandardOutput() {
     QByteArray data = m_process->readAllStandardOutput();
     if (!data.isEmpty()) {
-        QString output = convertEncoding(data);
+        // QString output = convertEncoding(data);
+        QString output = EncodingUtils::autoDetectAndConvert(data);
         emit standardOutput(output);
     }
 }
@@ -99,7 +97,8 @@ void ProcessRunner::onReadyReadStandardOutput() {
 void ProcessRunner::onReadyReadStandardError() {
     QByteArray data = m_process->readAllStandardError();
     if (!data.isEmpty()) {
-        QString error = convertEncoding(data);
+        // QString error = convertEncoding(data);
+        QString error = EncodingUtils::autoDetectAndConvert(data);
         emit standardError(error);
     }
 }
@@ -110,7 +109,12 @@ void ProcessRunner::onFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     qDebug() << "[ProcessRunner] Process finished with code" << exitCode
              << "status" << (exitStatus == QProcess::NormalExit ? "Normal" : "Crashed");
 
-    setState(exitStatus == QProcess::NormalExit ? ProcessState::Finished : ProcessState::Error);
+    // 如果当前状态已经是 Killed（用户主动停止），保持该状态
+    // 否则根据退出状态设置为 Finished 或 Error
+    if (m_state != ProcessState::Killed) {
+        setState(exitStatus == QProcess::NormalExit ? ProcessState::Finished : ProcessState::Error);
+    }
+
     emit finished(exitCode, exitStatus);
 }
 
@@ -148,20 +152,6 @@ void ProcessRunner::onStarted() {
     qDebug() << "[ProcessRunner] Process started, PID:" << processId();
     setState(ProcessState::Running);
     emit started();
-}
-
-QString ProcessRunner::convertEncoding(const QByteArray& data) {
-#ifdef Q_OS_WIN
-    // Windows 下，控制台输出通常是 GBK 编码
-    // 尝试使用 GBK 编解码器转换为 UTF-8
-    QTextCodec* codec = QTextCodec::codecForName("GBK");
-    if (codec) {
-        return codec->toUnicode(data);
-    }
-#endif
-
-    // Linux/macOS 通常已经是 UTF-8
-    return QString::fromUtf8(data);
 }
 
 void ProcessRunner::setState(ProcessState newState) {

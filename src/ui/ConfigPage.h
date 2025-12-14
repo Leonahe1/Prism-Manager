@@ -92,6 +92,7 @@ public slots:
     void reloadCurrentConfig();
     void validateConfig();
     void addConfigFile();
+    void addNewConfigItem();  // 新增：添加新配置项
 
     /**
      * @brief 切换编辑模式
@@ -107,7 +108,21 @@ public slots:
 signals:
     void configFileModified(const QString& filePath);
     void configFileSaved(const QString& filePath);
-    void configFileAdded(const QString& filePath);  // 新增：通知添加了新配置文件
+    void configFileAdded(const QString& filePath);
+    void configFileRemoved(const QString& filePath);  // 通知从列表移除了配置文件
+    void configFileDeleted(const QString& filePath);  // 通知删除了配置文件
+    void configFileRenamed(const QString& oldFilePath, const QString& newFilePath);  // 通知重命名了配置文件
+
+private slots:
+    // ========================================
+    // 右键菜单槽函数
+    // ========================================
+    void onTreeViewContextMenu(const QPoint& pos);
+    void onOpenInExplorer();
+    void onBackupFile();
+    void onRenameFile();
+    void onRemoveFromList();
+    void onDeleteFile();
 
 private:
     // ========================================
@@ -191,6 +206,13 @@ private:
      * @param configData 配置数据
      */
     void buildForm(const QMap<QString, ConfigItem>& configData);
+
+    /**
+     * @brief 动态添加单个配置项到表单
+     * @param key 配置项键名
+     * @param item 配置项数据
+     */
+    void addConfigItemToForm(const QString& key, const ConfigItem& item);
 
     /**
      * @brief 从表单收集数据并保存到文件
@@ -371,6 +393,13 @@ private:
      */
     QString updateYamlInPlace(const QVariantMap& flatData);
 
+    /**
+     * @brief 在原始 INI 内容中增量更新值（保持结构和顺序不变）
+     * @param flatData 表单收集的扁平化数据
+     * @return 更新后的 INI 文本
+     */
+    QString updateIniInPlace(const QVariantMap& flatData);
+
 #ifdef YAML_CPP_AVAILABLE
     /**
      * @brief 根据路径更新 YAML 节点
@@ -423,6 +452,7 @@ private:
     QPushButton* _reloadButton{ nullptr };
     QPushButton* _validateButton{ nullptr };
     QPushButton* _addFileButton{ nullptr };
+    QPushButton* _addItemButton{ nullptr };  // 新增：添加配置项按钮
 
     // ========================================
     // 数据管理
@@ -445,6 +475,9 @@ private:
     // 原始文档内容（用于保持保存时的结构不变）
     QString _originalContent;           // 原始文件内容
     QJsonDocument _originalJsonDoc;     // 原始 JSON 文档（仅 JSON 格式）
+
+    // 右键菜单相关
+    QString _contextMenuFilePath;       // 右键菜单选中的文件路径
 };
 
 } // namespace Prism
