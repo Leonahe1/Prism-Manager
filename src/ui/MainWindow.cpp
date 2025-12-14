@@ -425,6 +425,39 @@ namespace Prism {
             }
         });
 
+        // 连接配置文件移除信号
+        connect(configPage, &ConfigPage::configFileRemoved, this, [this, projectId](const QString& filePath) {
+            // 从项目的配置文件列表中移除
+            if (_openedProjects.contains(projectId)) {
+                _openedProjects[projectId].configFiles.removeAll(filePath);
+                saveProjectsToSettings();
+                qDebug() << "项目" << _openedProjects[projectId].name << "移除配置文件:" << filePath;
+            }
+        });
+
+        // 连接配置文件删除信号
+        connect(configPage, &ConfigPage::configFileDeleted, this, [this, projectId](const QString& filePath) {
+            // 从项目的配置文件列表中移除
+            if (_openedProjects.contains(projectId)) {
+                _openedProjects[projectId].configFiles.removeAll(filePath);
+                saveProjectsToSettings();
+                qDebug() << "项目" << _openedProjects[projectId].name << "删除配置文件:" << filePath;
+            }
+        });
+
+        // 连接配置文件重命名信号
+        connect(configPage, &ConfigPage::configFileRenamed, this, [this, projectId](const QString& oldFilePath, const QString& newFilePath) {
+            // 更新项目的配置文件列表
+            if (_openedProjects.contains(projectId)) {
+                int index = _openedProjects[projectId].configFiles.indexOf(oldFilePath);
+                if (index != -1) {
+                    _openedProjects[projectId].configFiles[index] = newFilePath;
+                    saveProjectsToSettings();
+                    qDebug() << "项目" << _openedProjects[projectId].name << "重命名配置文件:" << oldFilePath << "->" << newFilePath;
+                }
+            }
+        });
+
         // 保存引用（使用 projectId 作为 key）
         _projectConfigPages[projectId] = configPage;
         _projectProcessPages[projectId] = processPage;
@@ -838,6 +871,36 @@ namespace Prism {
                     _openedProjects[projectId].configFiles.append(filePath);
                     saveProjectsToSettings();
                     qDebug() << "项目" << _openedProjects[projectId].name << "添加配置文件:" << filePath;
+                }
+            });
+
+            // 连接配置文件移除信号
+            connect(configPage, &ConfigPage::configFileRemoved, this, [this, projectId = info.id](const QString& filePath) {
+                if (_openedProjects.contains(projectId)) {
+                    _openedProjects[projectId].configFiles.removeAll(filePath);
+                    saveProjectsToSettings();
+                    qDebug() << "项目" << _openedProjects[projectId].name << "移除配置文件:" << filePath;
+                }
+            });
+
+            // 连接配置文件删除信号
+            connect(configPage, &ConfigPage::configFileDeleted, this, [this, projectId = info.id](const QString& filePath) {
+                if (_openedProjects.contains(projectId)) {
+                    _openedProjects[projectId].configFiles.removeAll(filePath);
+                    saveProjectsToSettings();
+                    qDebug() << "项目" << _openedProjects[projectId].name << "删除配置文件:" << filePath;
+                }
+            });
+
+            // 连接配置文件重命名信号
+            connect(configPage, &ConfigPage::configFileRenamed, this, [this, projectId = info.id](const QString& oldFilePath, const QString& newFilePath) {
+                if (_openedProjects.contains(projectId)) {
+                    int index = _openedProjects[projectId].configFiles.indexOf(oldFilePath);
+                    if (index != -1) {
+                        _openedProjects[projectId].configFiles[index] = newFilePath;
+                        saveProjectsToSettings();
+                        qDebug() << "项目" << _openedProjects[projectId].name << "重命名配置文件:" << oldFilePath << "->" << newFilePath;
+                    }
                 }
             });
 

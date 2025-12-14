@@ -41,7 +41,6 @@
 
 #include <QDesktopServices>
 #include <QUrl>
-#include <QInputDialog>
 #include "JsonParser.h"
 #include "utils/EncodingUtils.h"
 
@@ -165,6 +164,7 @@ namespace Prism {
 
         // 左侧：添加新配置项按钮（仅在组件模式下可用）
         _addItemButton = new ElaPushButton("添加新配置项", this);
+        _addItemButton->setFixedWidth(110);
         _addItemButton->setEnabled(false);  // 默认禁用，打开文件后启用
         buttonLayout->addWidget(_addItemButton);
 
@@ -3103,14 +3103,66 @@ namespace Prism {
         QFileInfo fileInfo(_contextMenuFilePath);
         QString oldFileName = fileInfo.fileName();
 
-        // 弹出输入对话框
-        bool ok;
-        QString newFileName = QInputDialog::getText(this, "重命名文件",
-                                                     "请输入新文件名:",
-                                                     QLineEdit::Normal,
-                                                     oldFileName, &ok);
+        // 使用 ElaContentDialog 创建重命名对话框
+        ElaContentDialog* renameDialog = new ElaContentDialog(this);
+        renameDialog->setWindowTitle("重命名文件");
+        renameDialog->setLeftButtonText("取消");
+        renameDialog->setMiddleButtonText("");  // 设置为空文本
+        renameDialog->setRightButtonText("确定");
 
-        if (!ok || newFileName.isEmpty() || newFileName == oldFileName) {
+        // 手动隐藏中间按钮
+        QList<ElaPushButton*> buttons = renameDialog->findChildren<ElaPushButton*>();
+        if (buttons.size() >= 3) {
+            buttons[1]->setVisible(false);  // 中间按钮是第二个按钮
+        }
+
+        // 创建对话框内容
+        QWidget* contentWidget = new QWidget(renameDialog);
+        QVBoxLayout* contentLayout = new QVBoxLayout(contentWidget);
+        contentLayout->setContentsMargins(20, 20, 20, 20);
+
+        ElaText* promptText = new ElaText(contentWidget);
+        promptText->setText("请输入新文件名:");
+        promptText->setTextPixelSize(15);
+
+        ElaLineEdit* fileNameEdit = new ElaLineEdit(contentWidget);
+        fileNameEdit->setText(oldFileName);
+        fileNameEdit->selectAll();  // 选中所有文本，方便用户直接输入
+
+        contentLayout->addWidget(promptText);
+        contentLayout->addSpacing(10);
+        contentLayout->addWidget(fileNameEdit);
+
+        renameDialog->setCentralWidget(contentWidget);
+
+        // 用于记录用户选择和输入
+        bool confirmed = false;
+        QString newFileName;
+
+        // 取消按钮
+        connect(renameDialog, &ElaContentDialog::leftButtonClicked, this, [&confirmed, renameDialog]() {
+            confirmed = false;
+            renameDialog->close();
+        });
+
+        // 确定按钮
+        connect(renameDialog, &ElaContentDialog::rightButtonClicked, this, [&confirmed, &newFileName, fileNameEdit, renameDialog]() {
+            newFileName = fileNameEdit->text().trimmed();
+            confirmed = true;
+            renameDialog->close();
+        });
+
+        // 支持回车键确认
+        connect(fileNameEdit, &ElaLineEdit::returnPressed, this, [&confirmed, &newFileName, fileNameEdit, renameDialog]() {
+            newFileName = fileNameEdit->text().trimmed();
+            confirmed = true;
+            renameDialog->close();
+        });
+
+        renameDialog->exec();
+        renameDialog->deleteLater();
+
+        if (!confirmed || newFileName.isEmpty() || newFileName == oldFileName) {
             return;
         }
 
@@ -3125,6 +3177,7 @@ namespace Prism {
         }
 
         // 重命名文件
+        QString oldFilePath = _contextMenuFilePath;
         if (QFile::rename(_contextMenuFilePath, newFilePath)) {
             // 更新配置文件列表
             int index = _currentConfigFiles.indexOf(_contextMenuFilePath);
@@ -3139,6 +3192,9 @@ namespace Prism {
 
             // 刷新树视图
             loadConfigFiles(_currentConfigFiles);
+
+            // 发射信号通知 MainWindow
+            emit configFileRenamed(oldFilePath, newFilePath);
 
             ElaMessageBar::success(ElaMessageBarType::BottomRight, "重命名成功",
                                    QString("已重命名为: %1").arg(newFileName), 2000);
@@ -3205,8 +3261,15 @@ namespace Prism {
         ElaContentDialog* confirmDialog = new ElaContentDialog(this);
         confirmDialog->setWindowTitle("删除确认");
         confirmDialog->setLeftButtonText("取消");
-        confirmDialog->setMiddleButtonText("");  // 隐藏中间按钮
+        confirmDialog->setMiddleButtonText("");  // 设置为空文本
         confirmDialog->setRightButtonText("删除");
+
+        // 手动隐藏中间按钮（ElaContentDialog 没有提供直接隐藏的方法）
+        // 通过查找子控件来隐藏中间按钮
+        QList<ElaPushButton*> buttons = confirmDialog->findChildren<ElaPushButton*>();
+        if (buttons.size() >= 3) {
+            buttons[1]->setVisible(false);  // 中间按钮是第二个按钮
+        }
 
         // 创建对话框内容
         QWidget* contentWidget = new QWidget(confirmDialog);

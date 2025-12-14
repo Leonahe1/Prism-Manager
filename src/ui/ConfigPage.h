@@ -111,6 +111,7 @@ signals:
     void configFileAdded(const QString& filePath);
     void configFileRemoved(const QString& filePath);  // 通知从列表移除了配置文件
     void configFileDeleted(const QString& filePath);  // 通知删除了配置文件
+    void configFileRenamed(const QString& oldFilePath, const QString& newFilePath);  // 通知重命名了配置文件
 
 private slots:
     // ========================================

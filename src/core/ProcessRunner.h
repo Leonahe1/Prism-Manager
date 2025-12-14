@@ -115,12 +115,6 @@ private slots:
     void onStarted();
 
 private:
-    /**
-     * @brief 转换输出编码（Windows 下 GBK -> UTF-8）
-     * @param data 原始字节数据
-     * @return UTF-8 字符串
-     */
-    QString convertEncoding(const QByteArray& data);
 
     void setState(ProcessState newState);
 

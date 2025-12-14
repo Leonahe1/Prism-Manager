@@ -2,8 +2,11 @@
 #define PROCESSPAGE_H
 
 #include "BasePage.h"
+#include "ElaDef.h"
 #include <QString>
 #include <QProcess>
+#include <QMap>
+#include <memory>
 
 // 前向声明
 class ElaPlainTextEdit;
@@ -14,7 +17,7 @@ class QVBoxLayout;
 
 namespace Prism {
 
-class ProcessRunner;
+class ProcessRunner;  // 前向声明
 
 /**
  * @brief 进程监控页面
@@ -75,10 +78,15 @@ public slots:
 
     /**
      * @brief 追加日志输出
+     * @param level 日志级别 (INFO/SUCCESS/WARNING/ERROR/DEBUG/PROCESS/STDOUT/STDERR)
      * @param message 日志消息
-     * @param isError 是否为错误信息（红色显示）
      */
-    void appendLog(const QString& message, bool isError = false);
+    void appendLog(const QString& level, const QString& message);
+
+    /**
+     * @brief 浏览并选择程序
+     */
+    void browseProgram();
 
 signals:
     /**
@@ -123,21 +131,28 @@ private:
      */
     QString getTimestamp();
 
+    /**
+     * @brief 保存进程配置到持久化存储
+     */
+    void saveProcessConfig();
+
+    /**
+     * @brief 从持久化存储加载进程配置
+     */
+    void loadProcessConfig();
+
 private slots:
-    // ========================================
-    // 进程信号槽
-    // ========================================
-    void onProcessStarted();
-    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
-    void onProcessError(QProcess::ProcessError error);
-    void onProcessReadyReadStandardOutput();
-    void onProcessReadyReadStandardError();
+    /**
+     * @brief 主题变化响应
+     */
+    void onThemeChanged(ElaThemeType::ThemeMode mode);
 
 private:
     // ========================================
     // UI 组件
     // ========================================
     ElaLineEdit* _programLineEdit{ nullptr };      // 程序路径输入框
+    ElaPushButton* _browseButton{ nullptr };       // 浏览程序按钮
     ElaLineEdit* _argumentsLineEdit{ nullptr };    // 参数输入框
     ElaPushButton* _startButton{ nullptr };        // 启动按钮
     ElaPushButton* _stopButton{ nullptr };         // 停止按钮
@@ -149,11 +164,12 @@ private:
     // 数据管理
     // ========================================
     QString _currentProjectName;                   // 当前项目名称
-    QProcess* _process{ nullptr };                 // 进程对象
+    std::shared_ptr<ProcessRunner> _processRunner; // 进程运行器
     bool _isRunning{ false };                      // 是否正在运行
 
-    // TODO: 后续集成 ProcessRunner
-    // std::shared_ptr<ProcessRunner> _processRunner;
+    // 日志颜色方案
+    QMap<QString, QString> m_darkColors;           // 深色主题颜色
+    QMap<QString, QString> m_lightColors;          // 浅色主题颜色
 };
 
 } // namespace Prism
