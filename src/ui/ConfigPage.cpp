@@ -3078,8 +3078,10 @@ namespace Prism {
         // 复制文件
         if (QFile::copy(_contextMenuFilePath, backupPath)) {
             QString backupFileName = QFileInfo(backupPath).fileName();
+
+            // 使用标准的成功消息提示
             ElaMessageBar::success(ElaMessageBarType::BottomRight, "备份成功",
-                                   QString("已创建备份: %1").arg(backupFileName), 2000);
+                                  QString("已创建备份: %1").arg(backupFileName), 3000);
 
             if (auto* mainWin = qobject_cast<Prism::MainWindow*>(window())) {
                 mainWin->appendLog("SUCCESS", QString("备份文件: %1 -> %2").arg(fileInfo.fileName(), backupFileName));

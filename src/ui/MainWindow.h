@@ -94,6 +94,11 @@ public:
      */
     void appendLog(const QString& level, const QString& message);
 
+    /**
+     * @brief 重新加载当前项目（用于应用快照后刷新配置）
+     */
+    void reloadCurrentProject();
+
 private slots:
     // ========================================
     // 菜单栏槽函数
@@ -128,6 +133,7 @@ private:
     QMap<QString, QString> _projectExpanderKeys;       // 项目ID -> 展开节点Key
     QMap<QString, BasePage*> _projectConfigPages;      // 项目ID -> 配置页面
     QMap<QString, BasePage*> _projectProcessPages;     // 项目ID -> 进程页面
+    QMap<QString, BasePage*> _projectSnapshotPages;    // 项目ID -> 快照页面
     QMap<QString, QString> _pageKeyToProjectId;        // 页面Key -> 项目ID (反向查找)
     QString _currentProjectId;                         // 当前激活的项目ID
 

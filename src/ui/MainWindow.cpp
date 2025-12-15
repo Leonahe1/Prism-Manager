@@ -4,6 +4,7 @@
 #include "BasePage.h"
 #include "ConfigPage.h"
 #include "ProcessPage.h"
+#include "SnapshotPage.h"
 
 // ElaWidgetTools 组件
 #include "ElaContentDialog.h"
@@ -405,15 +406,20 @@ namespace Prism {
         ProcessPage *processPage = new ProcessPage(this);
         processPage->setProjectName(info.name);
 
+        SnapshotPage *snapshotPage = new SnapshotPage(this);
+        snapshotPage->setProject(info.rootPath, info.configFiles);
+
         // 注册到导航树
         QString projectExpanderKey;
         addExpanderNode(info.name, projectExpanderKey, _projectManagementKey, ElaIconType::Folder);
         addPageNode("配置文件", configPage, projectExpanderKey, 0, ElaIconType::FileCode);
         addPageNode("进程监控", processPage, projectExpanderKey, ElaIconType::Terminal);
+        addPageNode("配置快照", snapshotPage, projectExpanderKey, ElaIconType::Camera);
 
         // 获取页面的 Key（用于反向查找）
         QString configPageKey = configPage->property("ElaPageKey").toString();
         QString processPageKey = processPage->property("ElaPageKey").toString();
+        QString snapshotPageKey = snapshotPage->property("ElaPageKey").toString();
 
         // 连接配置文件添加信号
         connect(configPage, &ConfigPage::configFileAdded, this, [this, projectId](const QString& filePath) {
@@ -461,11 +467,13 @@ namespace Prism {
         // 保存引用（使用 projectId 作为 key）
         _projectConfigPages[projectId] = configPage;
         _projectProcessPages[projectId] = processPage;
+        _projectSnapshotPages[projectId] = snapshotPage;
         _projectExpanderKeys[projectId] = projectExpanderKey;
 
         // 建立页面Key到项目ID的反向映射
         _pageKeyToProjectId[configPageKey] = projectId;
         _pageKeyToProjectId[processPageKey] = projectId;
+        _pageKeyToProjectId[snapshotPageKey] = projectId;
         _pageKeyToProjectId[projectExpanderKey] = projectId;
 
         // 保存项目列表
@@ -855,15 +863,20 @@ namespace Prism {
             ProcessPage *processPage = new ProcessPage(this);
             processPage->setProjectName(info.name);
 
+            SnapshotPage *snapshotPage = new SnapshotPage(this);
+            snapshotPage->setProject(info.rootPath, info.configFiles);
+
             // 注册到导航树
             QString projectExpanderKey;
             addExpanderNode(info.name, projectExpanderKey, _projectManagementKey, ElaIconType::Folder);
             addPageNode("配置文件", configPage, projectExpanderKey, 0, ElaIconType::FileCode);
             addPageNode("进程监控", processPage, projectExpanderKey, ElaIconType::Terminal);
+            addPageNode("配置快照", snapshotPage, projectExpanderKey, ElaIconType::Camera);
 
             // 获取页面的 Key
             QString configPageKey = configPage->property("ElaPageKey").toString();
             QString processPageKey = processPage->property("ElaPageKey").toString();
+            QString snapshotPageKey = snapshotPage->property("ElaPageKey").toString();
 
             // 连接配置文件添加信号
             connect(configPage, &ConfigPage::configFileAdded, this, [this, projectId = info.id](const QString& filePath) {
@@ -907,11 +920,13 @@ namespace Prism {
             // 保存引用
             _projectConfigPages[info.id] = configPage;
             _projectProcessPages[info.id] = processPage;
+            _projectSnapshotPages[info.id] = snapshotPage;
             _projectExpanderKeys[info.id] = projectExpanderKey;
 
             // 建立页面Key到项目ID的反向映射
             _pageKeyToProjectId[configPageKey] = info.id;
             _pageKeyToProjectId[processPageKey] = info.id;
+            _pageKeyToProjectId[snapshotPageKey] = info.id;
             _pageKeyToProjectId[projectExpanderKey] = info.id;
 
             loadedCount++;
@@ -1008,6 +1023,41 @@ namespace Prism {
         // 记录主题切换日志
         QString themeName = isDark ? "Dark" : "Light";
         appendLog("DEBUG", QString("主题已切换: %1").arg(themeName));
+    }
+
+    void MainWindow::reloadCurrentProject()
+    {
+        if (_currentProjectId.isEmpty()) {
+            qDebug() << "[MainWindow] 当前没有激活的项目，无法重新加载";
+            return;
+        }
+
+        if (!_openedProjects.contains(_currentProjectId)) {
+            qDebug() << "[MainWindow] 当前项目ID无效:" << _currentProjectId;
+            return;
+        }
+
+        ProjectInfo& project = _openedProjects[_currentProjectId];
+
+        // 重新加载配置页面
+        if (_projectConfigPages.contains(_currentProjectId)) {
+            ConfigPage* configPage = qobject_cast<ConfigPage*>(_projectConfigPages[_currentProjectId]);
+            if (configPage) {
+                configPage->loadConfigFiles(project.configFiles);
+                qDebug() << "[MainWindow] 重新加载配置页面:" << project.name;
+            }
+        }
+
+        // 刷新快照页面
+        if (_projectSnapshotPages.contains(_currentProjectId)) {
+            SnapshotPage* snapshotPage = qobject_cast<SnapshotPage*>(_projectSnapshotPages[_currentProjectId]);
+            if (snapshotPage) {
+                snapshotPage->refreshSnapshots();
+                qDebug() << "[MainWindow] 刷新快照页面:" << project.name;
+            }
+        }
+
+        appendLog("INFO", QString("项目 \"%1\" 已重新加载").arg(project.name));
     }
 
 } // namespace Prism

@@ -19,6 +19,8 @@ set(PRISM_SOURCES
     core/ProcessRunner.cpp
     core/ProjectManager.h
     core/ProjectManager.cpp
+    core/SnapshotManager.h
+    core/SnapshotManager.cpp
 
     # UI
     ui/MainWindow.h
@@ -33,6 +35,10 @@ set(PRISM_SOURCES
     ui/AddConfigItemDialog.cpp
     ui/ProcessPage.h
     ui/ProcessPage.cpp
+    ui/SnapshotPage.h
+    ui/SnapshotPage.cpp
+    ui/CreateSnapshotDialog.h
+    ui/CreateSnapshotDialog.cpp
     # Utils
     utils/EncodingUtils.h
     utils/EncodingUtils.cpp
