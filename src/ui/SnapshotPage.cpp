@@ -10,11 +10,13 @@
 #include "ElaLineEdit.h"
 #include "ElaPlainTextEdit.h"
 #include "ElaTheme.h"
+#include "ElaScrollArea.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFrame>
 #include <QDateTime>
 #include <QDebug>
+#include <QScrollArea>
 
 // ========== SnapshotCard 实现 ==========
 
@@ -33,27 +35,34 @@ SnapshotCard::SnapshotCard(const SnapshotMetadata& metadata,
 }
 
 void SnapshotCard::setupUI() {
+    // 设置卡片的尺寸策略 - 水平扩展，垂直根据内容自适应
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 10);
+    mainLayout->setContentsMargins(5, 5, 5, 5);
+    mainLayout->setSpacing(0);
 
     // 创建卡片容器
     _cardWidget = new QWidget(this);
     _cardWidget->setObjectName("SnapshotCard");
+    _cardWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+
     QVBoxLayout* cardLayout = new QVBoxLayout(_cardWidget);
-    cardLayout->setContentsMargins(15, 15, 15, 15);
-    cardLayout->setSpacing(10);
+    cardLayout->setContentsMargins(16, 16, 16, 16);
+    cardLayout->setSpacing(8);
 
     // ========== 标题行 ==========
     QHBoxLayout* titleLayout = new QHBoxLayout();
+    titleLayout->setSpacing(10);
 
     // 快照名称
-    _nameLabel = new ElaText(_metadata.name, this);
+    _nameLabel = new ElaText(_metadata.name, _cardWidget);
     _nameLabel->setTextPixelSize(16);
     titleLayout->addWidget(_nameLabel);
 
     // 激活状态标识
     if (_metadata.isActive) {
-        ElaText* activeLabel = new ElaText("🟢 当前激活", this);
+        ElaText* activeLabel = new ElaText("🟢 当前激活", _cardWidget);
         activeLabel->setTextPixelSize(12);
         titleLayout->addWidget(activeLabel);
     }
@@ -61,24 +70,24 @@ void SnapshotCard::setupUI() {
     titleLayout->addStretch();
 
     // 操作按钮
-    _detailsButton = new ElaIconButton(ElaIconType::Eye, this);
-    _detailsButton->setFixedSize(30, 30);
+    _detailsButton = new ElaIconButton(ElaIconType::Eye, _cardWidget);
+    _detailsButton->setFixedSize(28, 28);
     _detailsButton->setToolTip("查看详情");
     connect(_detailsButton, &ElaIconButton::clicked, this, [this]() {
         emit viewDetailsRequested(_metadata.id);
     });
     titleLayout->addWidget(_detailsButton);
 
-    _renameButton = new ElaIconButton(ElaIconType::Pencil, this);
-    _renameButton->setFixedSize(30, 30);
+    _renameButton = new ElaIconButton(ElaIconType::Pencil, _cardWidget);
+    _renameButton->setFixedSize(28, 28);
     _renameButton->setToolTip("重命名");
     connect(_renameButton, &ElaIconButton::clicked, this, [this]() {
         emit renameRequested(_metadata.id);
     });
     titleLayout->addWidget(_renameButton);
 
-    _deleteButton = new ElaIconButton(ElaIconType::Trash, this);
-    _deleteButton->setFixedSize(30, 30);
+    _deleteButton = new ElaIconButton(ElaIconType::Trash, _cardWidget);
+    _deleteButton->setFixedSize(28, 28);
     _deleteButton->setToolTip("删除");
     connect(_deleteButton, &ElaIconButton::clicked, this, [this]() {
         emit deleteRequested(_metadata.id);
@@ -88,26 +97,26 @@ void SnapshotCard::setupUI() {
     cardLayout->addLayout(titleLayout);
 
     // ========== 信息行 ==========
-    _timeLabel = new ElaText(QString("创建时间: %1").arg(_metadata.createTime.toString("yyyy-MM-dd HH:mm:ss")), this);
-    _timeLabel->setTextPixelSize(12);
+    _timeLabel = new ElaText(QString("创建时间: %1").arg(_metadata.createTime.toString("yyyy-MM-dd HH:mm:ss")), _cardWidget);
+    _timeLabel->setTextPixelSize(13);
     cardLayout->addWidget(_timeLabel);
 
-    _filesLabel = new ElaText(QString("包含文件: %1 个").arg(_metadata.files.size()), this);
-    _filesLabel->setTextPixelSize(12);
+    _filesLabel = new ElaText(QString("包含文件: %1 个").arg(_metadata.files.size()), _cardWidget);
+    _filesLabel->setTextPixelSize(13);
     cardLayout->addWidget(_filesLabel);
 
     // 描述
     if (!_metadata.description.isEmpty()) {
-        _descLabel = new ElaText(_metadata.description, this);
-        _descLabel->setTextPixelSize(12);
+        _descLabel = new ElaText(_metadata.description, _cardWidget);
+        _descLabel->setTextPixelSize(13);
         _descLabel->setWordWrap(true);
         cardLayout->addWidget(_descLabel);
     }
 
     // ========== 应用按钮 ==========
     if (!_metadata.isActive) {
-        _applyButton = new ElaPushButton("应用此快照", this);
-        _applyButton->setFixedHeight(35);
+        _applyButton = new ElaPushButton("应用此快照", _cardWidget);
+        _applyButton->setFixedHeight(32);
         connect(_applyButton, &ElaPushButton::clicked, this, [this]() {
             emit applyRequested(_metadata.id);
         });
@@ -126,7 +135,7 @@ void SnapshotCard::updateTheme() {
         "    border: 1px solid %2;"
         "    border-radius: 8px;"
         "}"
-    ).arg(isDark ? "#2D2D2D" : "#F5F5F5",
+    ).arg(isDark ? "#2D2D2D" : "#FFFFFF",
           isDark ? "#404040" : "#E0E0E0");
 
     _cardWidget->setStyleSheet(cardStyle);
@@ -145,49 +154,64 @@ SnapshotPage::~SnapshotPage() {
 }
 
 void SnapshotPage::initUI() {
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(20, 20, 20, 20);
-    mainLayout->setSpacing(15);
+    // 创建中央容器
+    QWidget* centralWidget = new QWidget(this);
+    QVBoxLayout* mainLayout = new QVBoxLayout(centralWidget);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(10);
 
-    // ========== 标题栏 ==========
-    QHBoxLayout* headerLayout = new QHBoxLayout();
+    // ========== 标题栏区域 ==========
+    ElaScrollPageArea* headerArea = new ElaScrollPageArea(centralWidget);
+    QHBoxLayout* headerLayout = new QHBoxLayout(headerArea);
+    headerLayout->setContentsMargins(15, 10, 15, 10);
 
-    ElaText* titleText = new ElaText("📸 配置快照管理", this);
-    titleText->setTextPixelSize(20);
+    ElaText* titleText = new ElaText("配置快照管理", headerArea);
+    titleText->setTextPixelSize(18);
     headerLayout->addWidget(titleText);
 
     headerLayout->addStretch();
 
     // 刷新按钮
-    _refreshButton = new ElaIconButton(ElaIconType::ArrowsRotate, this);
-    _refreshButton->setFixedSize(35, 35);
+    _refreshButton = new ElaIconButton(ElaIconType::ArrowsRotate, headerArea);
+    _refreshButton->setFixedSize(32, 32);
     _refreshButton->setToolTip("刷新");
     connect(_refreshButton, &ElaIconButton::clicked, this, &SnapshotPage::onRefresh);
     headerLayout->addWidget(_refreshButton);
 
     // 创建快照按钮
-    _createButton = new ElaPushButton("+ 创建快照", this);
-    _createButton->setFixedSize(120, 35);
+    _createButton = new ElaPushButton("+ 创建快照", headerArea);
+    _createButton->setFixedSize(110, 32);
     connect(_createButton, &ElaPushButton::clicked, this, &SnapshotPage::onCreateSnapshot);
     headerLayout->addWidget(_createButton);
 
-    mainLayout->addLayout(headerLayout);
+    mainLayout->addWidget(headerArea);
 
-    // ========== 快照列表 ==========
-    _scrollArea = new ElaScrollPageArea(this);
-    _snapshotsLayout = new QVBoxLayout(_scrollArea);
+    // ========== 快照列表滚动区域 (使用 ElaScrollArea) ==========
+    _scrollArea = new ElaScrollArea(centralWidget);
+    _scrollArea->setWidgetResizable(true);
+    _scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    _scrollArea->setIsGrabGesture(true);
+
+    // 滚动区域内的容器
+    _scrollContainer = new QWidget(_scrollArea);
+    _snapshotsLayout = new QVBoxLayout(_scrollContainer);
+    _snapshotsLayout->setContentsMargins(5, 5, 5, 5);
     _snapshotsLayout->setSpacing(10);
-    _snapshotsLayout->setContentsMargins(10, 10, 10, 10);
     _snapshotsLayout->addStretch();
 
-    mainLayout->addWidget(_scrollArea);
+    _scrollArea->setWidget(_scrollContainer);
+    mainLayout->addWidget(_scrollArea, 1);
 
     // ========== 空状态提示 ==========
-    _emptyStateText = new ElaText("暂无快照，点击上方按钮创建第一个快照", this);
+    _emptyStateText = new ElaText("暂无快照，点击上方按钮创建第一个快照", centralWidget);
     _emptyStateText->setTextPixelSize(14);
     _emptyStateText->setAlignment(Qt::AlignCenter);
     _emptyStateText->setVisible(false);
-    mainLayout->addWidget(_emptyStateText);
+    mainLayout->addWidget(_emptyStateText, 1, Qt::AlignCenter);
+
+    centralWidget->setWindowTitle("配置快照");
+    // 使用 ElaScrollPage 的 addCentralWidget 方法添加内容
+    addCentralWidget(centralWidget, true, false, 0);
 }
 
 void SnapshotPage::setProject(const QString& projectPath, const QStringList& configFiles) {
@@ -214,13 +238,13 @@ void SnapshotPage::refreshSnapshots() {
         return;
     }
 
-    // 隐藏空状态提示
+    // 隐藏空状态提示，显示卡片列表
     _emptyStateText->setVisible(false);
     _scrollArea->setVisible(true);
 
     // 创建快照卡片
     for (const SnapshotMetadata& metadata : snapshots) {
-        SnapshotCard* card = new SnapshotCard(metadata, _projectPath, this);
+        SnapshotCard* card = new SnapshotCard(metadata, _projectPath, _scrollContainer);
 
         connect(card, &SnapshotCard::applyRequested, this, &SnapshotPage::onApplySnapshot);
         connect(card, &SnapshotCard::renameRequested, this, &SnapshotPage::onRenameSnapshot);
@@ -299,7 +323,7 @@ void SnapshotPage::onApplySnapshot(const QString& snapshotId) {
     // 显示确认对话框
     auto* confirmDialog = new ElaContentDialog(this);
     confirmDialog->setWindowTitle("应用快照");
-
+    confirmDialog->setFixedHeight(150);
     QWidget* contentWidget = new QWidget(confirmDialog);
     QVBoxLayout* layout = new QVBoxLayout(contentWidget);
 
@@ -316,6 +340,11 @@ void SnapshotPage::onApplySnapshot(const QString& snapshotId) {
     confirmDialog->setMiddleButtonText("");
     confirmDialog->setRightButtonText("应用");
 
+    QList<ElaPushButton*> buttons = confirmDialog->findChildren<ElaPushButton*>();
+    if (buttons.size() >= 3) {
+        // 隐藏中间按钮
+        buttons[1]->setVisible(false);
+    }
     connect(confirmDialog, &ElaContentDialog::rightButtonClicked, this, [this, snapshotId, confirmDialog]() {
         QString errorMsg;
         if (SnapshotManager::instance().applySnapshot(_projectPath, snapshotId, errorMsg)) {
@@ -360,7 +389,11 @@ void SnapshotPage::onRenameSnapshot(const QString& snapshotId) {
     // 显示重命名对话框
     auto* renameDialog = new ElaContentDialog(this);
     renameDialog->setWindowTitle("重命名快照");
-
+    QList<ElaPushButton *> buttons = renameDialog->findChildren<ElaPushButton*>();
+    if (buttons.size() >= 3)
+    {
+        buttons[1]->setVisible(false);
+    }
     QWidget* contentWidget = new QWidget(renameDialog);
     QVBoxLayout* layout = new QVBoxLayout(contentWidget);
 
@@ -473,29 +506,69 @@ void SnapshotPage::onViewDetails(const QString& snapshotId) {
     // 显示详情对话框
     auto* detailsDialog = new ElaContentDialog(this);
     detailsDialog->setWindowTitle("快照详情");
-
+    detailsDialog->setMinimumHeight(400);
+    QList<ElaPushButton *> buttons = detailsDialog->findChildren<ElaPushButton*>();
+    if (buttons.size() >= 3)
+    {
+        buttons[0]->setVisible(false);
+        buttons[1]->setVisible(false);
+    }
     QWidget* contentWidget = new QWidget(detailsDialog);
     QVBoxLayout* layout = new QVBoxLayout(contentWidget);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(12);
 
-    // 快照信息
-    layout->addWidget(new ElaText(QString("快照名称: %1").arg(metadata.name), detailsDialog));
-    layout->addWidget(new ElaText(QString("创建时间: %1").arg(metadata.createTime.toString("yyyy-MM-dd HH:mm:ss")), detailsDialog));
-    layout->addWidget(new ElaText(QString("快照ID: %1").arg(metadata.id), detailsDialog));
+    // 快照名称
+    ElaText* nameText = new ElaText(QString("快照名称: %1").arg(metadata.name), contentWidget);
+    nameText->setTextPixelSize(15);
+    layout->addWidget(nameText);
 
+    // 创建时间
+    ElaText* timeText = new ElaText(QString("创建时间: %1").arg(metadata.createTime.toString("yyyy-MM-dd HH:mm:ss")), contentWidget);
+    timeText->setTextPixelSize(13);
+    layout->addWidget(timeText);
+
+    // 快照ID
+    ElaText* idText = new ElaText(QString("快照ID: %1").arg(metadata.id), contentWidget);
+    idText->setTextPixelSize(13);
+    layout->addWidget(idText);
+
+    // 描述
     if (!metadata.description.isEmpty()) {
-        layout->addWidget(new ElaText(QString("描述: %1").arg(metadata.description), detailsDialog));
+        ElaText* descText = new ElaText(QString("描述: %1").arg(metadata.description), contentWidget);
+        descText->setTextPixelSize(13);
+        descText->setWordWrap(true);
+        layout->addWidget(descText);
     }
 
+    // 分隔
+    layout->addSpacing(5);
+
     // 包含的文件列表
-    ElaText* filesTitle = new ElaText(QString("包含文件 (%1 个):").arg(metadata.files.size()), detailsDialog);
+    ElaText* filesTitle = new ElaText(QString("包含文件 (%1 个):").arg(metadata.files.size()), contentWidget);
     filesTitle->setTextPixelSize(14);
     layout->addWidget(filesTitle);
 
+    // 文件列表使用滚动区域（防止文件太多）
+    ElaScrollArea* fileScrollArea = new ElaScrollArea(contentWidget);
+    fileScrollArea->setWidgetResizable(true);
+    fileScrollArea->setMaximumHeight(150);
+    fileScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    QWidget* fileListWidget = new QWidget(fileScrollArea);
+    QVBoxLayout* fileListLayout = new QVBoxLayout(fileListWidget);
+    fileListLayout->setContentsMargins(5, 5, 5, 5);
+    fileListLayout->setSpacing(4);
+
     for (const QString& file : metadata.files) {
-        ElaText* fileText = new ElaText(QString("  • %1").arg(file), detailsDialog);
+        ElaText* fileText = new ElaText(QString("• %1").arg(file), fileListWidget);
         fileText->setTextPixelSize(12);
-        layout->addWidget(fileText);
+        fileListLayout->addWidget(fileText);
     }
+    fileListLayout->addStretch();
+
+    fileScrollArea->setWidget(fileListWidget);
+    layout->addWidget(fileScrollArea);
 
     detailsDialog->setCentralWidget(contentWidget);
     detailsDialog->setLeftButtonText("");

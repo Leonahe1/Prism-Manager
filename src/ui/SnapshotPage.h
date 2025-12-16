@@ -93,7 +93,8 @@ private:
     QString _projectPath;
     QStringList _configFiles;
 
-    ElaScrollPageArea* _scrollArea;
+    QWidget* _scrollContainer;
+    ElaScrollArea* _scrollArea;
     QVBoxLayout* _snapshotsLayout;
     ElaPushButton* _createButton;
     ElaIconButton* _refreshButton;
