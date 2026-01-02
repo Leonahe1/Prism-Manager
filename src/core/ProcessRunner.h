@@ -32,10 +32,11 @@ public:
      * @param program 程序路径或命令
      * @param arguments 命令行参数
      * @param workingDirectory 工作目录（可选）
+     * @param showConsole 是否显示控制台窗口（仅 Windows 有效）
      * @return 是否成功启动
      */
     bool start(const QString& program, const QStringList& arguments = QStringList(),
-               const QString& workingDirectory = QString());
+               const QString& workingDirectory = QString(), bool showConsole = false);
 
     /**
      * @brief 终止进程

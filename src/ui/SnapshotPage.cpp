@@ -194,6 +194,7 @@ void SnapshotPage::initUI() {
 
     // 滚动区域内的容器
     _scrollContainer = new QWidget(_scrollArea);
+    _scrollContainer->setStyleSheet("background: transparent;");
     _snapshotsLayout = new QVBoxLayout(_scrollContainer);
     _snapshotsLayout->setContentsMargins(5, 5, 5, 5);
     _snapshotsLayout->setSpacing(10);
@@ -556,6 +557,7 @@ void SnapshotPage::onViewDetails(const QString& snapshotId) {
     fileScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     QWidget* fileListWidget = new QWidget(fileScrollArea);
+    fileListWidget->setStyleSheet("background: transparent;");
     QVBoxLayout* fileListLayout = new QVBoxLayout(fileListWidget);
     fileListLayout->setContentsMargins(5, 5, 5, 5);
     fileListLayout->setSpacing(4);

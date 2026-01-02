@@ -1,24 +1,38 @@
 #include "ProcessPage.h"
+#include "ProcessEditDialog.h"
 #include "core/ProcessRunner.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QStandardItemModel>
 #include <QDateTime>
-#include <QTextCodec>
 #include <QTextCursor>
 #include <QDebug>
-#include <QFileDialog>
 #include <QSettings>
-#include <QTimer>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QUuid>
 
 #include "ElaPlainTextEdit.h"
 #include "ElaPushButton.h"
-#include "ElaLineEdit.h"
 #include "ElaText.h"
 #include "ElaMessageBar.h"
 #include "ElaTheme.h"
+#include "ElaTabWidget.h"
+#include "ElaTableView.h"
 
 namespace Prism {
+
+// 表格列索引
+enum TableColumn {
+    COL_STATUS = 0,
+    COL_NAME,
+    COL_PROGRAM,
+    COL_OPERATION,
+    COL_COUNT
+};
 
 ProcessPage::ProcessPage(QWidget* parent)
     : BasePage(parent)
@@ -26,30 +40,26 @@ ProcessPage::ProcessPage(QWidget* parent)
     setWindowTitle("进程监控");
 
     // 定义日志级别对应的颜色（深色主题）
-    m_darkColors["INFO"] = "#61AFEF";      // 蓝色
-    m_darkColors["SUCCESS"] = "#98C379";   // 绿色
-    m_darkColors["WARNING"] = "#E5C07B";   // 黄色
-    m_darkColors["ERROR"] = "#E06C75";     // 红色
-    m_darkColors["DEBUG"] = "#C678DD";     // 紫色
-    m_darkColors["PROCESS"] = "#56B6C2";   // 青色
-    m_darkColors["STDOUT"] = "#ABB2BF";    // 灰白
-    m_darkColors["STDERR"] = "#E06C75";    // 红色
+    m_darkColors["INFO"] = "#61AFEF";
+    m_darkColors["SUCCESS"] = "#98C379";
+    m_darkColors["WARNING"] = "#E5C07B";
+    m_darkColors["ERROR"] = "#E06C75";
+    m_darkColors["DEBUG"] = "#C678DD";
+    m_darkColors["PROCESS"] = "#56B6C2";
+    m_darkColors["STDOUT"] = "#ABB2BF";
+    m_darkColors["STDERR"] = "#E06C75";
 
     // 定义日志级别对应的颜色（浅色主题）
-    m_lightColors["INFO"] = "#0078D4";     // 蓝色
-    m_lightColors["SUCCESS"] = "#107C10";  // 绿色
-    m_lightColors["WARNING"] = "#F7630C";  // 橙色
-    m_lightColors["ERROR"] = "#D13438";    // 红色
-    m_lightColors["DEBUG"] = "#8764B8";    // 紫色
-    m_lightColors["PROCESS"] = "#00979C";  // 青色
-    m_lightColors["STDOUT"] = "#323130";   // 深灰
-    m_lightColors["STDERR"] = "#D13438";   // 红色
+    m_lightColors["INFO"] = "#0078D4";
+    m_lightColors["SUCCESS"] = "#107C10";
+    m_lightColors["WARNING"] = "#F7630C";
+    m_lightColors["ERROR"] = "#D13438";
+    m_lightColors["DEBUG"] = "#8764B8";
+    m_lightColors["PROCESS"] = "#00979C";
+    m_lightColors["STDOUT"] = "#323130";
+    m_lightColors["STDERR"] = "#D13438";
 
     initUI();
-
-    // 创建 ProcessRunner 实例
-    _processRunner = std::make_shared<ProcessRunner>(this);
-
     setupConnections();
 
     // 连接主题切换信号
@@ -58,404 +68,672 @@ ProcessPage::ProcessPage(QWidget* parent)
     // 加载持久化配置
     loadProcessConfig();
 
-    qDebug() << "ProcessPage 初始化完成";
+    qDebug() << "ProcessPage 表格式布局初始化完成";
 }
 
 ProcessPage::~ProcessPage()
 {
-    if (_processRunner && _processRunner->isRunning()) {
-        _processRunner->stop(true);  // 强制停止
-        _processRunner->waitForFinished(3000);
+    // 停止所有运行中的进程
+    for (auto& data : _processData) {
+        if (data.runner && data.runner->isRunning()) {
+            data.runner->stop(true);
+            data.runner->waitForFinished(3000);
+        }
     }
 }
 
 void ProcessPage::initUI()
 {
-    // ========================================
-    // 顶部：命令输入区域
-    // ========================================
-    QWidget* topWidget = new QWidget(this);
-    QVBoxLayout* topLayout = new QVBoxLayout(topWidget);
-    topLayout->setContentsMargins(10, 5, 10, 5);
-
-    // 程序路径输入
-    QHBoxLayout* programLayout = new QHBoxLayout();
-    ElaText* programLabel = new ElaText("程序路径:", this);
-    programLabel->setTextPixelSize(14);
-    programLabel->setFixedWidth(80);
-    _programLineEdit = new ElaLineEdit(this);
-    _programLineEdit->setPlaceholderText("输入可执行文件路径，例如: ./simulator.exe");
-    _browseButton = new ElaPushButton("浏览...", this);
-    _browseButton->setFixedWidth(80);
-    programLayout->addWidget(programLabel);
-    programLayout->addWidget(_programLineEdit);
-    programLayout->addWidget(_browseButton);
-
-    // 参数输入
-    QHBoxLayout* argumentsLayout = new QHBoxLayout();
-    ElaText* argumentsLabel = new ElaText("命令参数:", this);
-    argumentsLabel->setTextPixelSize(14);
-    argumentsLabel->setFixedWidth(80);
-    _argumentsLineEdit = new ElaLineEdit(this);
-    _argumentsLineEdit->setPlaceholderText("输入命令行参数，例如: --config=config.yaml --verbose");
-    argumentsLayout->addWidget(argumentsLabel);
-    argumentsLayout->addWidget(_argumentsLineEdit);
-
-    topLayout->addLayout(programLayout);
-    topLayout->addLayout(argumentsLayout);
-
-    // ========================================
-    // 中间：日志输出区域（黑色终端风格）
-    // ========================================
-    QWidget* middleWidget = new QWidget(this);
-    QVBoxLayout* middleLayout = new QVBoxLayout(middleWidget);
-    middleLayout->setContentsMargins(10, 5, 10, 5);
-
-    ElaText* logTitle = new ElaText("日志输出", this);
-    logTitle->setTextPixelSize(16);
-    middleLayout->addWidget(logTitle);
-
-    _logTextEdit = new ElaPlainTextEdit(this);
-    _logTextEdit->setReadOnly(true);
-
-    // 根据当前主题设置样式
-    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
-    if (isDark) {
-        _logTextEdit->setStyleSheet(
-            "ElaPlainTextEdit { "
-            "background-color: #1E1E1E; "
-            "color: #D4D4D4; "
-            "font-family: 'Consolas', 'Courier New', monospace; "
-            "font-size: 11pt; "
-            "}"
-        );
-    } else {
-        _logTextEdit->setStyleSheet(
-            "ElaPlainTextEdit { "
-            "background-color: #FFFFFF; "
-            "color: #323130; "
-            "font-family: 'Consolas', 'Courier New', monospace; "
-            "font-size: 11pt; "
-            "border: 1px solid #E1E1E1; "
-            "}"
-        );
-    }
-
-    middleLayout->addWidget(_logTextEdit);
-
-    // ========================================
-    // 底部：按钮区域
-    // ========================================
-    QWidget* bottomWidget = new QWidget(this);
-    QHBoxLayout* buttonLayout = new QHBoxLayout(bottomWidget);
-    buttonLayout->setContentsMargins(10, 5, 10, 10);
-    buttonLayout->addStretch();
-
-    _clearButton = new ElaPushButton("清空日志", this);
-    _clearButton->setFixedWidth(100);
-    buttonLayout->addWidget(_clearButton);
-
-    _stopButton = new ElaPushButton("停止", this);
-    _stopButton->setFixedWidth(100);
-    _stopButton->setEnabled(false);
-    buttonLayout->addWidget(_stopButton);
-
-    _startButton = new ElaPushButton("启动", this);
-    _startButton->setFixedWidth(100);
-    buttonLayout->addWidget(_startButton);
-
-    // ========================================
-    // 组装到页面中央
-    // ========================================
     QWidget* centralWidget = new QWidget(this);
-    centralWidget->setWindowTitle("进程监控");  // 设置标题，避免显示 Page_0
-    QVBoxLayout* centerLayout = new QVBoxLayout(centralWidget);
-    centerLayout->setContentsMargins(0, 0, 0, 0);
-    centerLayout->addWidget(topWidget);
-    centerLayout->addWidget(middleWidget, 1); // 日志区域占据主要空间
-    centerLayout->addWidget(bottomWidget);
+    centralWidget->setWindowTitle("进程监控");
+    QVBoxLayout* mainLayout = new QVBoxLayout(centralWidget);
+    mainLayout->setContentsMargins(10, 10, 10, 10);
+    mainLayout->setSpacing(10);
 
-    // 禁用垂直拖拽手势和鼠标延迟，避免干扰输入操作
+    // ========================================
+    // 顶部：工具栏
+    // ========================================
+    QWidget* toolbarWidget = new QWidget(centralWidget);
+    QHBoxLayout* toolbarLayout = new QHBoxLayout(toolbarWidget);
+    toolbarLayout->setContentsMargins(0, 0, 0, 0);
+    toolbarLayout->setSpacing(10);
+
+    _addProcessButton = new ElaPushButton("+ 添加进程", toolbarWidget);
+    _addProcessButton->setFixedWidth(100);
+
+    _startAllButton = new ElaPushButton("▶ 全部启动", toolbarWidget);
+    _startAllButton->setFixedWidth(100);
+
+    _stopAllButton = new ElaPushButton("■ 全部停止", toolbarWidget);
+    _stopAllButton->setFixedWidth(100);
+    _stopAllButton->setEnabled(false);
+
+    toolbarLayout->addWidget(_addProcessButton);
+    toolbarLayout->addWidget(_startAllButton);
+    toolbarLayout->addWidget(_stopAllButton);
+    toolbarLayout->addStretch();
+
+    mainLayout->addWidget(toolbarWidget);
+
+    // ========================================
+    // 中间：进程表格
+    // ========================================
+    _processTable = new ElaTableView(centralWidget);
+    _processTableModel = new QStandardItemModel(0, COL_COUNT, this);
+    _processTableModel->setHorizontalHeaderLabels({"状态", "进程名称", "程序路径", "操作"});
+
+    _processTable->setModel(_processTableModel);
+    _processTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    _processTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    _processTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    _processTable->setAlternatingRowColors(true);
+    _processTable->verticalHeader()->setVisible(false);
+    _processTable->setShowGrid(true);
+
+    // 设置列宽
+    QHeaderView* header = _processTable->horizontalHeader();
+    header->setSectionResizeMode(COL_STATUS, QHeaderView::Fixed);
+    header->setSectionResizeMode(COL_NAME, QHeaderView::Interactive);
+    header->setSectionResizeMode(COL_PROGRAM, QHeaderView::Stretch);
+    header->setSectionResizeMode(COL_OPERATION, QHeaderView::Fixed);
+    _processTable->setColumnWidth(COL_STATUS, 60);
+    _processTable->setColumnWidth(COL_NAME, 150);
+    _processTable->setColumnWidth(COL_OPERATION, 200);
+
+    _processTable->setMinimumHeight(120);
+    _processTable->setMaximumHeight(200);
+
+    mainLayout->addWidget(_processTable);
+
+    // ========================================
+    // 底部：日志 Tab 区域
+    // ========================================
+    ElaText* logTitle = new ElaText("日志输出", centralWidget);
+    logTitle->setTextPixelSize(16);
+    mainLayout->addWidget(logTitle);
+
+    _logTabWidget = new ElaTabWidget(centralWidget);
+    _logTabWidget->setTabsClosable(false);
+    _logTabWidget->setMovable(false);
+
+    // 创建"全部"日志页
+    _allLogTextEdit = createLogTextEdit();
+    _logTabWidget->addTab(_allLogTextEdit, "全部");
+
+    mainLayout->addWidget(_logTabWidget, 1);
+
+    // ========================================
+    // 底部按钮区域
+    // ========================================
+    QWidget* bottomWidget = new QWidget(centralWidget);
+    QHBoxLayout* bottomLayout = new QHBoxLayout(bottomWidget);
+    bottomLayout->setContentsMargins(0, 0, 0, 0);
+    bottomLayout->addStretch();
+
+    _clearCurrentLogButton = new ElaPushButton("清空当前日志", bottomWidget);
+    _clearCurrentLogButton->setFixedWidth(120);
+
+    _clearAllLogButton = new ElaPushButton("清空全部日志", bottomWidget);
+    _clearAllLogButton->setFixedWidth(120);
+
+    bottomLayout->addWidget(_clearCurrentLogButton);
+    bottomLayout->addWidget(_clearAllLogButton);
+
+    mainLayout->addWidget(bottomWidget);
+
     addCentralWidget(centralWidget, true, false, 0);
 
-    // 添加初始日志消息
-    appendLog("INFO", "进程监控页面已就绪");
-    appendLog("INFO", "请输入程序路径后点击「启动」按钮");
+    // 初始日志
+    appendLog(_allLogTextEdit, "INFO", "进程监控页面已就绪");
+    appendLog(_allLogTextEdit, "INFO", "点击「+ 添加进程」按钮配置新的进程");
 }
 
 void ProcessPage::setupConnections()
 {
-    // 按钮点击
-    connect(_startButton, &ElaPushButton::clicked, this, &ProcessPage::startProcess);
-    connect(_stopButton, &ElaPushButton::clicked, this, [this]() {
-        stopProcess(false);
-    });
-    connect(_clearButton, &ElaPushButton::clicked, this, &ProcessPage::clearLog);
-    connect(_browseButton, &ElaPushButton::clicked, this, &ProcessPage::browseProgram);
-
-    // 输入框变化时保存配置
-    connect(_programLineEdit, &ElaLineEdit::textChanged, this, &ProcessPage::saveProcessConfig);
-    connect(_argumentsLineEdit, &ElaLineEdit::textChanged, this, &ProcessPage::saveProcessConfig);
-
-    // ========================================
-    // ProcessRunner 信号连接
-    // ========================================
-
-    // 标准输出信号（已自动转换编码）
-    connect(_processRunner.get(), &ProcessRunner::standardOutput, this, [this](const QString& output) {
-        // 按行分割输出
-        QStringList lines = output.split('\n', QString::SkipEmptyParts);
-        for (const QString& line : lines) {
-            QString trimmedLine = line.trimmed();
-            if (!trimmedLine.isEmpty()) {
-                appendLog("STDOUT", trimmedLine);
-            }
-        }
-    });
-
-    // 标准错误输出信号（已自动转换编码）
-    connect(_processRunner.get(), &ProcessRunner::standardError, this, [this](const QString& error) {
-        // 按行分割输出
-        QStringList lines = error.split('\n', QString::SkipEmptyParts);
-        for (const QString& line : lines) {
-            QString trimmedLine = line.trimmed();
-            if (!trimmedLine.isEmpty()) {
-                appendLog("STDERR", trimmedLine);
-            }
-        }
-    });
-
-    // 进程启动信号
-    connect(_processRunner.get(), &ProcessRunner::started, this, [this]() {
-        updateProcessStatus(true);
-        appendLog("SUCCESS", "进程已启动");
-        ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
-                               "进程已启动", 1500);
-        emit processStarted(_currentProjectName);
-    });
-
-    // 进程结束信号
-    connect(_processRunner.get(), &ProcessRunner::finished, this,
-            [this](int exitCode, QProcess::ExitStatus exitStatus) {
-        updateProcessStatus(false);
-
-        // 检查是否是用户主动停止
-        bool isUserStopped = (_processRunner->getState() == ProcessRunner::ProcessState::Killed);
-
-        if (isUserStopped) {
-            // 用户主动停止，不报告异常
-            appendLog("PROCESS", QString("进程已停止，退出码: %1").arg(exitCode));
-            ElaMessageBar::information(ElaMessageBarType::BottomRight, "信息",
-                                       "进程已停止", 1500);
-        } else if (exitStatus == QProcess::NormalExit) {
-            // 进程正常退出
-            appendLog("PROCESS", QString("进程正常退出，退出码: %1").arg(exitCode));
-            ElaMessageBar::information(ElaMessageBarType::BottomRight, "信息",
-                                       QString("进程已退出 (代码: %1)").arg(exitCode), 2000);
-        } else {
-            // 进程异常崩溃
-            appendLog("ERROR", "进程异常崩溃");
-            ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
-                                 "进程异常崩溃", 2000);
-        }
-
-        emit processStopped(_currentProjectName, exitCode);
-    });
-
-    // 进程错误信号
-    connect(_processRunner.get(), &ProcessRunner::errorOccurred, this, [this](const QString& error) {
-        appendLog("ERROR", error);
-        ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误", error, 2000);
-        emit processError(_currentProjectName, error);
-    });
-
-    // 进程状态变化信号
-    connect(_processRunner.get(), &ProcessRunner::stateChanged, this,
-            [this](ProcessRunner::ProcessState state) {
-        bool isRunning = (state == ProcessRunner::ProcessState::Running);
-        updateProcessStatus(isRunning);
-
-        // 记录状态变化日志
-        QString stateStr;
-        switch (state) {
-        case ProcessRunner::ProcessState::NotStarted:
-            stateStr = "未启动";
-            break;
-        case ProcessRunner::ProcessState::Running:
-            stateStr = "运行中";
-            break;
-        case ProcessRunner::ProcessState::Finished:
-            stateStr = "已完成";
-            break;
-        case ProcessRunner::ProcessState::Error:
-            stateStr = "错误";
-            break;
-        case ProcessRunner::ProcessState::Killed:
-            stateStr = "已终止";
-            break;
-        }
-        qDebug() << "ProcessPage 进程状态变化:" << stateStr;
-    });
+    connect(_addProcessButton, &ElaPushButton::clicked, this, &ProcessPage::addProcess);
+    connect(_startAllButton, &ElaPushButton::clicked, this, &ProcessPage::startAllProcesses);
+    connect(_stopAllButton, &ElaPushButton::clicked, this, &ProcessPage::stopAllProcesses);
+    connect(_clearCurrentLogButton, &ElaPushButton::clicked, this, &ProcessPage::clearCurrentLog);
+    connect(_clearAllLogButton, &ElaPushButton::clicked, this, &ProcessPage::clearAllLogs);
 }
 
 void ProcessPage::setProjectName(const QString& projectName)
 {
-    _currentProjectName = projectName;
-    qDebug() << "ProcessPage 设置项目名称:" << projectName;
+    if (_currentProjectName == projectName) {
+        return;
+    }
 
-    // 重新加载该项目的配置
+    // 停止所有进程
+    stopAllProcesses();
+
+    // 清理表格和数据
+    _processTableModel->setRowCount(0);
+    for (const auto& data : _processData) {
+        removeLogTab(data.config.id);
+    }
+    _processData.clear();
+
+    _currentProjectName = projectName;
     loadProcessConfig();
 }
 
-void ProcessPage::setProgram(const QString& program)
+void ProcessPage::addProcess()
 {
-    _programLineEdit->setText(program);
+    ProcessEditDialog dialog(this, false);
+    if (dialog.exec() == QDialog::Accepted) {
+        ProcessConfig config = dialog.getConfig();
+        addTableRow(config);
+        addLogTab(config.id, config.name);
+        saveProcessConfig();
+
+        appendLog(_allLogTextEdit, "INFO", QString("已添加进程: %1").arg(config.name));
+        updateGlobalButtonStates();
+    }
 }
 
-void ProcessPage::setArguments(const QStringList& arguments)
+void ProcessPage::editProcess(int row)
 {
-    _argumentsLineEdit->setText(arguments.join(" "));
-}
-
-void ProcessPage::startProcess()
-{
-    QString program = _programLineEdit->text().trimmed();
-    if (program.isEmpty()) {
-        ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
-                               "请输入程序路径", 1500);
+    if (row < 0 || row >= _processData.size()) {
         return;
     }
 
-    if (_processRunner->isRunning()) {
+    // 运行中不允许编辑
+    if (_processData[row].isRunning) {
         ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
-                               "进程已在运行中", 1500);
+                               "请先停止进程再编辑", 1500);
         return;
     }
 
-    // 解析参数
-    QString argumentsStr = _argumentsLineEdit->text().trimmed();
+    ProcessEditDialog dialog(this, true);
+    dialog.setConfig(_processData[row].config);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        ProcessConfig newConfig = dialog.getConfig();
+        QString oldName = _processData[row].config.name;
+
+        _processData[row].config = newConfig;
+        updateTableRow(row);
+        updateLogTabName(newConfig.id, newConfig.name);
+        saveProcessConfig();
+
+        appendLog(_allLogTextEdit, "INFO", QString("已更新进程: %1 -> %2").arg(oldName).arg(newConfig.name));
+    }
+}
+
+void ProcessPage::deleteProcess(int row)
+{
+    if (row < 0 || row >= _processData.size()) {
+        return;
+    }
+
+    // 运行中先停止
+    if (_processData[row].isRunning) {
+        _processData[row].runner->stop(true);
+        _processData[row].runner->waitForFinished(3000);
+    }
+
+    QString name = _processData[row].config.name;
+    QString configId = _processData[row].config.id;
+
+    removeLogTab(configId);
+    removeTableRow(row);
+    saveProcessConfig();
+
+    appendLog(_allLogTextEdit, "INFO", QString("已删除进程: %1").arg(name));
+    updateGlobalButtonStates();
+}
+
+void ProcessPage::startProcess(int row)
+{
+    if (row < 0 || row >= _processData.size()) {
+        return;
+    }
+
+    auto& data = _processData[row];
+    if (data.isRunning) {
+        return;
+    }
+
+    if (data.config.program.isEmpty()) {
+        ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
+                               "未设置程序路径", 1500);
+        return;
+    }
+
+    // 创建 ProcessRunner（如果不存在）
+    if (!data.runner) {
+        data.runner = std::make_shared<ProcessRunner>(this);
+        connectProcessSignals(row);
+    }
+
     QStringList arguments;
-    if (!argumentsStr.isEmpty()) {
-        arguments = argumentsStr.split(' ', QString::SkipEmptyParts);
+    if (!data.config.arguments.isEmpty()) {
+        arguments = data.config.arguments.split(' ', QString::SkipEmptyParts);
     }
 
-    appendLog("PROCESS", QString("启动程序: %1").arg(program));
-    if (!arguments.isEmpty()) {
-        appendLog("PROCESS", QString("命令参数: %1").arg(arguments.join(" ")));
+    appendLogToTab(data.config.id, "PROCESS", QString("启动程序: %1").arg(data.config.program));
+    if (data.config.showConsole) {
+        appendLogToTab(data.config.id, "INFO", "已启用独立控制台窗口，日志将不会在此处显示");
     }
 
-    // 使用 ProcessRunner 启动进程
-    if (!_processRunner->start(program, arguments)) {
-        appendLog("ERROR", "进程启动失败");
-        ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
-                             "进程启动失败", 2000);
+    if (!data.runner->start(data.config.program, arguments, data.config.workingDirectory, data.config.showConsole)) {
+        appendLogToTab(data.config.id, "ERROR", "进程启动失败");
     }
 }
 
-void ProcessPage::stopProcess(bool forceKill)
+void ProcessPage::stopProcess(int row)
 {
-    if (!_processRunner->isRunning()) {
-        ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
-                               "进程未运行", 1500);
+    if (row < 0 || row >= _processData.size()) {
         return;
     }
 
-    appendLog("PROCESS", forceKill ? "正在强制终止进程..." : "正在终止进程...");
-
-    // 使用 ProcessRunner 停止进程
-    _processRunner->stop(forceKill);
-
-    // 如果是优雅终止，等待一段时间后检查是否需要强制杀死
-    if (!forceKill) {
-        QTimer::singleShot(3000, this, [this]() {
-            if (_processRunner->isRunning()) {
-                appendLog("WARNING", "进程未响应，强制终止");
-                _processRunner->stop(true);  // 强制杀死
-            }
-        });
-    }
-}
-
-void ProcessPage::clearLog()
-{
-    _logTextEdit->clear();
-    appendLog("INFO", "日志已清空");
-}
-
-void ProcessPage::appendLog(const QString& level, const QString& message)
-{
-    if (!_logTextEdit) {
+    auto& data = _processData[row];
+    if (!data.isRunning || !data.runner) {
         return;
     }
 
-    // 获取当前时间戳
-    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-
-    // 根据当前主题选择颜色方案
-    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
-    QMap<QString, QString> &colors = isDark ? m_darkColors : m_lightColors;
-
-    // 获取颜色
-    QString color = colors.value(level, isDark ? "#D4D4D4" : "#323130");
-
-    // 构建带颜色的日志行
-    QString logLine = QString("<span style='color: %1;'>[%2] [%3] %4</span>")
-                          .arg(color)
-                          .arg(timestamp)
-                          .arg(level)
-                          .arg(message);
-
-    // 追加日志（使用HTML格式）
-    _logTextEdit->appendHtml(logLine);
-
-    // 自动滚动到底部
-    QTextCursor cursor = _logTextEdit->textCursor();
-    cursor.movePosition(QTextCursor::End);
-    _logTextEdit->setTextCursor(cursor);
+    appendLogToTab(data.config.id, "PROCESS", "正在停止进程...");
+    data.runner->stop(false);
 }
 
-void ProcessPage::updateProcessStatus(bool isRunning)
+void ProcessPage::startAllProcesses()
 {
-    _isRunning = isRunning;
-    _startButton->setEnabled(!isRunning);
-    _stopButton->setEnabled(isRunning);
+    int count = 0;
+    for (int i = 0; i < _processData.size(); ++i) {
+        if (!_processData[i].isRunning && !_processData[i].config.program.isEmpty()) {
+            startProcess(i);
+            count++;
+        }
+    }
 
-    if (isRunning) {
-        _programLineEdit->setEnabled(false);
-        _argumentsLineEdit->setEnabled(false);
+    if (count > 0) {
+        ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
+                               QString("正在启动 %1 个进程").arg(count), 1500);
+    }
+}
+
+void ProcessPage::stopAllProcesses()
+{
+    int count = 0;
+    for (int i = 0; i < _processData.size(); ++i) {
+        if (_processData[i].isRunning) {
+            stopProcess(i);
+            count++;
+        }
+    }
+
+    if (count > 0) {
+        appendLog(_allLogTextEdit, "INFO", QString("正在停止 %1 个进程").arg(count));
+    }
+}
+
+void ProcessPage::clearCurrentLog()
+{
+    int currentIndex = _logTabWidget->currentIndex();
+    if (currentIndex == 0) {
+        _allLogTextEdit->clear();
+        appendLog(_allLogTextEdit, "INFO", "日志已清空");
     } else {
-        _programLineEdit->setEnabled(true);
-        _argumentsLineEdit->setEnabled(true);
+        QWidget* widget = _logTabWidget->widget(currentIndex);
+        ElaPlainTextEdit* textEdit = qobject_cast<ElaPlainTextEdit*>(widget);
+        if (textEdit) {
+            textEdit->clear();
+            appendLog(textEdit, "INFO", "日志已清空");
+        }
     }
 }
 
-QString ProcessPage::getTimestamp()
+void ProcessPage::clearAllLogs()
 {
-    return QDateTime::currentDateTime().toString("[HH:mm:ss]");
+    _allLogTextEdit->clear();
+    appendLog(_allLogTextEdit, "INFO", "所有日志已清空");
+
+    for (auto it = _logTextEdits.begin(); it != _logTextEdits.end(); ++it) {
+        it.value()->clear();
+    }
 }
 
 void ProcessPage::onThemeChanged(ElaThemeType::ThemeMode mode)
 {
-    if (!_logTextEdit) {
+    // 更新日志样式
+    updateLogStyle(_allLogTextEdit);
+    for (auto it = _logTextEdits.begin(); it != _logTextEdits.end(); ++it) {
+        updateLogStyle(it.value());
+    }
+}
+
+void ProcessPage::addTableRow(const ProcessConfig& config)
+{
+    int row = _processTableModel->rowCount();
+
+    // 添加数据
+    ProcessRowData rowData;
+    rowData.config = config;
+    rowData.isRunning = false;
+    _processData.append(rowData);
+
+    // 创建行数据
+    QList<QStandardItem*> items;
+
+    // 状态列
+    QStandardItem* statusItem = new QStandardItem("○ 停止");
+    statusItem->setTextAlignment(Qt::AlignCenter);
+    items.append(statusItem);
+
+    // 名称列
+    QStandardItem* nameItem = new QStandardItem(config.name);
+    items.append(nameItem);
+
+    // 程序路径列
+    QStandardItem* programItem = new QStandardItem(config.program);
+    programItem->setToolTip(config.program);
+    items.append(programItem);
+
+    // 操作列（占位，实际使用 widget）
+    QStandardItem* operationItem = new QStandardItem();
+    items.append(operationItem);
+
+    _processTableModel->appendRow(items);
+
+    // 设置操作列的 widget
+    QWidget* opWidget = createOperationWidget(row);
+    _processTable->setIndexWidget(_processTableModel->index(row, COL_OPERATION), opWidget);
+
+    _processTable->setRowHeight(row, 36);
+}
+
+void ProcessPage::updateTableRow(int row)
+{
+    if (row < 0 || row >= _processData.size()) {
         return;
     }
 
-    // 根据主题更新日志窗口样式
-    bool isDark = (mode == ElaThemeType::Dark);
+    const auto& data = _processData[row];
 
+    // 更新状态
+    QStandardItem* statusItem = _processTableModel->item(row, COL_STATUS);
+    if (statusItem) {
+        statusItem->setText(data.isRunning ? "● 运行" : "○ 停止");
+        statusItem->setForeground(data.isRunning ? QColor("#107C10") : QColor("#666666"));
+    }
+
+    // 更新名称
+    QStandardItem* nameItem = _processTableModel->item(row, COL_NAME);
+    if (nameItem) {
+        nameItem->setText(data.config.name);
+    }
+
+    // 更新程序路径
+    QStandardItem* programItem = _processTableModel->item(row, COL_PROGRAM);
+    if (programItem) {
+        programItem->setText(data.config.program);
+        programItem->setToolTip(data.config.program);
+    }
+
+    // 更新操作按钮状态
+    updateOperationButtons(row, data.isRunning);
+}
+
+void ProcessPage::removeTableRow(int row)
+{
+    if (row < 0 || row >= _processData.size()) {
+        return;
+    }
+
+    _processTableModel->removeRow(row);
+    _processData.removeAt(row);
+
+    // 更新后续行的操作按钮（因为 row 索引变了）
+    for (int i = row; i < _processData.size(); ++i) {
+        QWidget* opWidget = createOperationWidget(i);
+        _processTable->setIndexWidget(_processTableModel->index(i, COL_OPERATION), opWidget);
+    }
+}
+
+QWidget* ProcessPage::createOperationWidget(int row)
+{
+    QWidget* widget = new QWidget();
+    QHBoxLayout* layout = new QHBoxLayout(widget);
+    layout->setContentsMargins(5, 2, 5, 2);
+    layout->setSpacing(5);
+
+    bool isRunning = (row < _processData.size()) ? _processData[row].isRunning : false;
+
+    ElaPushButton* startStopBtn = new ElaPushButton(isRunning ? "停止" : "启动", widget);
+    startStopBtn->setFixedSize(50, 26);
+    startStopBtn->setObjectName("startStopBtn");
+
+    ElaPushButton* editBtn = new ElaPushButton("编辑", widget);
+    editBtn->setFixedSize(50, 26);
+    editBtn->setEnabled(!isRunning);
+    editBtn->setObjectName("editBtn");
+
+    ElaPushButton* deleteBtn = new ElaPushButton("删除", widget);
+    deleteBtn->setFixedSize(50, 26);
+    deleteBtn->setObjectName("deleteBtn");
+
+    layout->addWidget(startStopBtn);
+    layout->addWidget(editBtn);
+    layout->addWidget(deleteBtn);
+    layout->addStretch();
+
+    // 连接信号（使用 lambda 捕获当前行）
+    connect(startStopBtn, &ElaPushButton::clicked, this, [this, row]() {
+        if (row < _processData.size()) {
+            if (_processData[row].isRunning) {
+                stopProcess(row);
+            } else {
+                startProcess(row);
+            }
+        }
+    });
+
+    connect(editBtn, &ElaPushButton::clicked, this, [this, row]() {
+        editProcess(row);
+    });
+
+    connect(deleteBtn, &ElaPushButton::clicked, this, [this, row]() {
+        deleteProcess(row);
+    });
+
+    return widget;
+}
+
+void ProcessPage::updateOperationButtons(int row, bool isRunning)
+{
+    QWidget* widget = _processTable->indexWidget(_processTableModel->index(row, COL_OPERATION));
+    if (!widget) {
+        return;
+    }
+
+    ElaPushButton* startStopBtn = widget->findChild<ElaPushButton*>("startStopBtn");
+    ElaPushButton* editBtn = widget->findChild<ElaPushButton*>("editBtn");
+
+    if (startStopBtn) {
+        startStopBtn->setText(isRunning ? "停止" : "启动");
+    }
+    if (editBtn) {
+        editBtn->setEnabled(!isRunning);
+    }
+}
+
+void ProcessPage::connectProcessSignals(int row)
+{
+    if (row < 0 || row >= _processData.size()) {
+        return;
+    }
+
+    auto& data = _processData[row];
+    if (!data.runner) {
+        return;
+    }
+
+    QString configId = data.config.id;
+
+    connect(data.runner.get(), &ProcessRunner::started, this, [this, configId]() {
+        onProcessStarted(configId);
+    });
+
+    connect(data.runner.get(), &ProcessRunner::finished, this,
+            [this, configId](int exitCode, QProcess::ExitStatus status) {
+        onProcessFinished(configId, exitCode, status);
+    });
+
+    connect(data.runner.get(), &ProcessRunner::errorOccurred, this,
+            [this, configId](const QString& error) {
+        onProcessError(configId, error);
+    });
+
+    connect(data.runner.get(), &ProcessRunner::standardOutput, this,
+            [this, configId](const QString& output) {
+        onProcessOutput(configId, output, false);
+    });
+
+    connect(data.runner.get(), &ProcessRunner::standardError, this,
+            [this, configId](const QString& error) {
+        onProcessOutput(configId, error, true);
+    });
+}
+
+void ProcessPage::onProcessStarted(const QString& configId)
+{
+    int row = findRowByConfigId(configId);
+    if (row < 0) return;
+
+    _processData[row].isRunning = true;
+    updateTableRow(row);
+    updateGlobalButtonStates();
+
+    appendLogToTab(configId, "SUCCESS", "进程已启动");
+    emit processStarted(_currentProjectName, _processData[row].config.name);
+}
+
+void ProcessPage::onProcessFinished(const QString& configId, int exitCode, QProcess::ExitStatus status)
+{
+    int row = findRowByConfigId(configId);
+    if (row < 0) return;
+
+    _processData[row].isRunning = false;
+    updateTableRow(row);
+    updateGlobalButtonStates();
+
+    if (status == QProcess::NormalExit) {
+        appendLogToTab(configId, "PROCESS", QString("进程退出，退出码: %1").arg(exitCode));
+    } else {
+        appendLogToTab(configId, "ERROR", "进程异常崩溃");
+    }
+
+    emit processStopped(_currentProjectName, _processData[row].config.name, exitCode);
+}
+
+void ProcessPage::onProcessError(const QString& configId, const QString& error)
+{
+    appendLogToTab(configId, "ERROR", error);
+}
+
+void ProcessPage::onProcessOutput(const QString& configId, const QString& output, bool isError)
+{
+    QStringList lines = output.split('\n', QString::SkipEmptyParts);
+    for (const QString& line : lines) {
+        QString trimmed = line.trimmed();
+        if (!trimmed.isEmpty()) {
+            appendLogToTab(configId, isError ? "STDERR" : "STDOUT", trimmed);
+        }
+    }
+}
+
+ElaPlainTextEdit* ProcessPage::createLogTextEdit()
+{
+    ElaPlainTextEdit* textEdit = new ElaPlainTextEdit(this);
+    textEdit->setReadOnly(true);
+    updateLogStyle(textEdit);
+    return textEdit;
+}
+
+void ProcessPage::addLogTab(const QString& configId, const QString& name)
+{
+    ElaPlainTextEdit* textEdit = createLogTextEdit();
+    int tabIndex = _logTabWidget->addTab(textEdit, name);
+    _logTextEdits[configId] = textEdit;
+    _logTabIndices[configId] = tabIndex;
+}
+
+void ProcessPage::removeLogTab(const QString& configId)
+{
+    if (!_logTabIndices.contains(configId)) {
+        return;
+    }
+
+    int tabIndex = _logTabIndices[configId];
+    _logTabWidget->removeTab(tabIndex);
+    _logTextEdits.remove(configId);
+    _logTabIndices.remove(configId);
+
+    // 重新计算索引
+    int index = 1;
+    for (auto it = _logTabIndices.begin(); it != _logTabIndices.end(); ++it) {
+        it.value() = index++;
+    }
+}
+
+void ProcessPage::updateLogTabName(const QString& configId, const QString& newName)
+{
+    if (_logTabIndices.contains(configId)) {
+        int tabIndex = _logTabIndices[configId];
+        _logTabWidget->setTabText(tabIndex, newName);
+    }
+}
+
+void ProcessPage::appendLog(ElaPlainTextEdit* textEdit, const QString& level, const QString& message)
+{
+    if (!textEdit) return;
+
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+    QMap<QString, QString>& colors = isDark ? m_darkColors : m_lightColors;
+    QString color = colors.value(level, isDark ? "#D4D4D4" : "#323130");
+
+    QString logLine = QString("<span style='color: %1;'>[%2] [%3] %4</span>")
+                          .arg(color).arg(timestamp).arg(level).arg(message.toHtmlEscaped());
+
+    textEdit->appendHtml(logLine);
+
+    QTextCursor cursor = textEdit->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    textEdit->setTextCursor(cursor);
+}
+
+void ProcessPage::appendLogToTab(const QString& configId, const QString& level, const QString& message)
+{
+    // 追加到对应进程的日志
+    if (_logTextEdits.contains(configId)) {
+        appendLog(_logTextEdits[configId], level, message);
+    }
+
+    // 同时追加到"全部"日志
+    int row = findRowByConfigId(configId);
+    QString processName = (row >= 0) ? _processData[row].config.name : "Unknown";
+    QString prefixedMessage = QString("[%1] %2").arg(processName).arg(message);
+    appendLog(_allLogTextEdit, level, prefixedMessage);
+}
+
+void ProcessPage::updateLogStyle(ElaPlainTextEdit* textEdit)
+{
+    if (!textEdit) return;
+
+    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
     if (isDark) {
-        // 深色主题：深色背景 + 浅色文字
-        _logTextEdit->setStyleSheet(
+        textEdit->setStyleSheet(
             "ElaPlainTextEdit { "
             "background-color: #1E1E1E; "
             "color: #D4D4D4; "
             "font-family: 'Consolas', 'Courier New', monospace; "
             "font-size: 11pt; "
+            "border: 1px solid #3D3D3D; "
             "}"
         );
     } else {
-        // 浅色主题：浅色背景 + 深色文字
-        _logTextEdit->setStyleSheet(
+        textEdit->setStyleSheet(
             "ElaPlainTextEdit { "
             "background-color: #FFFFFF; "
             "color: #323130; "
@@ -464,84 +742,103 @@ void ProcessPage::onThemeChanged(ElaThemeType::ThemeMode mode)
             "border: 1px solid #E1E1E1; "
             "}"
         );
-    }
-
-    // 记录主题切换日志
-    QString themeName = isDark ? "Dark" : "Light";
-    appendLog("DEBUG", QString("主题已切换: %1").arg(themeName));
-}
-
-void ProcessPage::browseProgram()
-{
-    // 打开文件选择对话框
-    QString fileName = QFileDialog::getOpenFileName(
-        this,
-        "选择可执行程序",
-        QString(),  // 默认目录
-#ifdef Q_OS_WIN
-        "可执行文件 (*.exe *.bat *.cmd);;所有文件 (*.*)"
-#else
-        "可执行文件 (*);;所有文件 (*.*)"
-#endif
-    );
-
-    if (!fileName.isEmpty()) {
-        _programLineEdit->setText(fileName);
-        appendLog("INFO", QString("已选择程序: %1").arg(fileName));
     }
 }
 
 void ProcessPage::saveProcessConfig()
 {
-    if (!_programLineEdit || !_argumentsLineEdit) {
-        return;
-    }
-
-    // 使用项目名称作为配置键的一部分
-    QString settingsKey = QString("ProcessPage/%1").arg(_currentProjectName.isEmpty() ? "default" : _currentProjectName);
+    QString settingsKey = QString("ProcessPage/MultiProcess/%1")
+                              .arg(_currentProjectName.isEmpty() ? "default" : _currentProjectName);
 
     QSettings settings("GTTC", "Prism");
-    settings.beginGroup(settingsKey);
-    settings.setValue("program", _programLineEdit->text());
-    settings.setValue("arguments", _argumentsLineEdit->text());
-    settings.endGroup();
 
-    qDebug() << "ProcessPage 保存配置:" << settingsKey
-             << "program:" << _programLineEdit->text()
-             << "arguments:" << _argumentsLineEdit->text();
+    QJsonArray configArray;
+    for (const auto& data : _processData) {
+        QJsonObject obj;
+        obj["id"] = data.config.id;
+        obj["name"] = data.config.name;
+        obj["program"] = data.config.program;
+        obj["arguments"] = data.config.arguments;
+        obj["workingDirectory"] = data.config.workingDirectory;
+        obj["showConsole"] = data.config.showConsole;
+        configArray.append(obj);
+    }
+
+    QJsonDocument doc(configArray);
+    settings.setValue(settingsKey, doc.toJson(QJsonDocument::Compact));
 }
 
 void ProcessPage::loadProcessConfig()
 {
-    if (!_programLineEdit || !_argumentsLineEdit) {
+    QString settingsKey = QString("ProcessPage/MultiProcess/%1")
+                              .arg(_currentProjectName.isEmpty() ? "default" : _currentProjectName);
+
+    QSettings settings("GTTC", "Prism");
+    QString jsonStr = settings.value(settingsKey, "").toString();
+
+    if (jsonStr.isEmpty()) {
         return;
     }
 
-    // 使用项目名称作为配置键的一部分
-    QString settingsKey = QString("ProcessPage/%1").arg(_currentProjectName.isEmpty() ? "default" : _currentProjectName);
-
-    QSettings settings("GTTC", "Prism");
-    settings.beginGroup(settingsKey);
-    QString program = settings.value("program", "").toString();
-    QString arguments = settings.value("arguments", "").toString();
-    settings.endGroup();
-
-    // 阻止信号触发，避免重复保存
-    _programLineEdit->blockSignals(true);
-    _argumentsLineEdit->blockSignals(true);
-
-    _programLineEdit->setText(program);
-    _argumentsLineEdit->setText(arguments);
-
-    _programLineEdit->blockSignals(false);
-    _argumentsLineEdit->blockSignals(false);
-
-    if (!program.isEmpty()) {
-        appendLog("INFO", QString("已加载上次配置: %1").arg(program));
-        qDebug() << "ProcessPage 加载配置:" << settingsKey
-                 << "program:" << program
-                 << "arguments:" << arguments;
+    QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
+    if (!doc.isArray()) {
+        return;
     }
+
+    QJsonArray configArray = doc.array();
+    for (const QJsonValue& value : configArray) {
+        QJsonObject obj = value.toObject();
+
+        ProcessConfig config;
+        config.id = obj["id"].toString();
+        config.name = obj["name"].toString();
+        config.program = obj["program"].toString();
+        config.arguments = obj["arguments"].toString();
+        config.workingDirectory = obj["workingDirectory"].toString();
+        config.showConsole = obj["showConsole"].toBool(false);
+
+        if (config.id.isEmpty()) {
+            config.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
+
+        addTableRow(config);
+        addLogTab(config.id, config.name);
+    }
+
+    if (!_processData.isEmpty()) {
+        appendLog(_allLogTextEdit, "INFO",
+                  QString("已加载 %1 个进程配置").arg(_processData.size()));
+    }
+
+    updateGlobalButtonStates();
+}
+
+int ProcessPage::findRowByConfigId(const QString& configId)
+{
+    for (int i = 0; i < _processData.size(); ++i) {
+        if (_processData[i].config.id == configId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void ProcessPage::updateGlobalButtonStates()
+{
+    bool hasRunning = false;
+    bool hasConfigured = false;
+
+    for (const auto& data : _processData) {
+        if (data.isRunning) {
+            hasRunning = true;
+        }
+        if (!data.config.program.isEmpty()) {
+            hasConfigured = true;
+        }
+    }
+
+    _startAllButton->setEnabled(hasConfigured && !hasRunning);
+    _stopAllButton->setEnabled(hasRunning);
 }
 
 } // namespace Prism

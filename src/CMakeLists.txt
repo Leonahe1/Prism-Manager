@@ -39,6 +39,8 @@ set(PRISM_SOURCES
     ui/SnapshotPage.cpp
     ui/CreateSnapshotDialog.h
     ui/CreateSnapshotDialog.cpp
+    ui/ProcessEditDialog.h
+    ui/ProcessEditDialog.cpp
     # Utils
     utils/EncodingUtils.h
     utils/EncodingUtils.cpp

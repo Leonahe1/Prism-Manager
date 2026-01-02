@@ -2,36 +2,42 @@
 #define PROCESSPAGE_H
 
 #include "BasePage.h"
+#include "ProcessEditDialog.h"
 #include "ElaDef.h"
 #include <QString>
 #include <QProcess>
 #include <QMap>
+#include <QList>
 #include <memory>
 
 // 前向声明
 class ElaPlainTextEdit;
 class ElaPushButton;
-class ElaLineEdit;
-class ElaProgressBar;
+class ElaTabWidget;
+class ElaTableView;
 class QVBoxLayout;
+class QStandardItemModel;
 
 namespace Prism {
 
-class ProcessRunner;  // 前向声明
+class ProcessRunner;
 
 /**
- * @brief 进程监控页面
+ * @brief 进程表格行数据
+ */
+struct ProcessRowData {
+    ProcessConfig config;
+    std::shared_ptr<ProcessRunner> runner;
+    bool isRunning{ false };
+};
+
+/**
+ * @brief 多进程监控页面（表格式布局）
  *
- * 职责：
- * - 顶部：运行命令输入框 + 参数输入框
- * - 中间：日志输出区域（黑色终端风格）
- * - 底部：运行/停止按钮 + 进程状态指示
- *
- * 设计要点：
- * - 实时捕获 stdout 和 stderr
- * - 支持一键启动和强制终止
- * - 自动编码转换（GBK → UTF-8 on Windows）
- * - 进程状态显示（运行中/已停止/错误）
+ * 布局设计（参考 Supervisor）：
+ * - 顶部：工具栏（添加进程、全部启动、全部停止）
+ * - 中间：进程表格（名称、程序路径、状态、操作按钮）
+ * - 底部：日志 Tab 页（全部 + 各进程独立日志）
  */
 class ProcessPage : public BasePage
 {
@@ -43,133 +49,139 @@ public:
 
     /**
      * @brief 设置当前项目名称
-     * @param projectName 项目名称（用于从 ProjectManager 获取 ProcessRunner）
      */
     void setProjectName(const QString& projectName);
 
-    /**
-     * @brief 设置要运行的程序路径
-     * @param program 程序路径
-     */
-    void setProgram(const QString& program);
-
-    /**
-     * @brief 设置命令行参数
-     * @param arguments 参数列表
-     */
-    void setArguments(const QStringList& arguments);
-
 public slots:
     /**
-     * @brief 启动进程
+     * @brief 添加新进程
      */
-    void startProcess();
+    void addProcess();
+
+    /**
+     * @brief 编辑进程
+     * @param row 表格行索引
+     */
+    void editProcess(int row);
+
+    /**
+     * @brief 删除进程
+     * @param row 表格行索引
+     */
+    void deleteProcess(int row);
+
+    /**
+     * @brief 启动进程
+     * @param row 表格行索引
+     */
+    void startProcess(int row);
 
     /**
      * @brief 停止进程
-     * @param forceKill 是否强制杀死（默认 false，先尝试优雅退出）
+     * @param row 表格行索引
      */
-    void stopProcess(bool forceKill = false);
+    void stopProcess(int row);
 
     /**
-     * @brief 清空日志
+     * @brief 启动所有进程
      */
-    void clearLog();
+    void startAllProcesses();
 
     /**
-     * @brief 追加日志输出
-     * @param level 日志级别 (INFO/SUCCESS/WARNING/ERROR/DEBUG/PROCESS/STDOUT/STDERR)
-     * @param message 日志消息
+     * @brief 停止所有进程
      */
-    void appendLog(const QString& level, const QString& message);
+    void stopAllProcesses();
 
     /**
-     * @brief 浏览并选择程序
+     * @brief 清空当前日志
      */
-    void browseProgram();
+    void clearCurrentLog();
+
+    /**
+     * @brief 清空所有日志
+     */
+    void clearAllLogs();
 
 signals:
-    /**
-     * @brief 进程启动信号
-     * @param projectName 项目名称
-     */
-    void processStarted(const QString& projectName);
-
-    /**
-     * @brief 进程停止信号
-     * @param projectName 项目名称
-     * @param exitCode 退出码
-     */
-    void processStopped(const QString& projectName, int exitCode);
-
-    /**
-     * @brief 进程错误信号
-     * @param projectName 项目名称
-     * @param error 错误信息
-     */
-    void processError(const QString& projectName, const QString& error);
-
-private:
-    // ========================================
-    // 初始化方法
-    // ========================================
-    void initUI();
-    void setupConnections();
-
-    // ========================================
-    // 辅助方法
-    // ========================================
-    /**
-     * @brief 更新进程状态 UI
-     * @param isRunning 是否正在运行
-     */
-    void updateProcessStatus(bool isRunning);
-
-    /**
-     * @brief 格式化日志时间戳
-     * @return 格式化的时间字符串 [HH:mm:ss]
-     */
-    QString getTimestamp();
-
-    /**
-     * @brief 保存进程配置到持久化存储
-     */
-    void saveProcessConfig();
-
-    /**
-     * @brief 从持久化存储加载进程配置
-     */
-    void loadProcessConfig();
+    void processStarted(const QString& projectName, const QString& processName);
+    void processStopped(const QString& projectName, const QString& processName, int exitCode);
 
 private slots:
-    /**
-     * @brief 主题变化响应
-     */
     void onThemeChanged(ElaThemeType::ThemeMode mode);
 
 private:
+    // 初始化
+    void initUI();
+    void setupConnections();
+
+    // 表格操作
+    void addTableRow(const ProcessConfig& config);
+    void updateTableRow(int row);
+    void removeTableRow(int row);
+    QWidget* createOperationWidget(int row);
+    void updateOperationButtons(int row, bool isRunning);
+
+    // 进程管理
+    void connectProcessSignals(int row);
+    void onProcessStarted(const QString& configId);
+    void onProcessFinished(const QString& configId, int exitCode, QProcess::ExitStatus status);
+    void onProcessError(const QString& configId, const QString& error);
+    void onProcessOutput(const QString& configId, const QString& output, bool isError);
+
+    // 日志管理
+    ElaPlainTextEdit* createLogTextEdit();
+    void addLogTab(const QString& configId, const QString& name);
+    void removeLogTab(const QString& configId);
+    void updateLogTabName(const QString& configId, const QString& newName);
+    void appendLog(ElaPlainTextEdit* textEdit, const QString& level, const QString& message);
+    void appendLogToTab(const QString& configId, const QString& level, const QString& message);
+    void updateLogStyle(ElaPlainTextEdit* textEdit);
+
+    // 持久化
+    void saveProcessConfig();
+    void loadProcessConfig();
+
+    // 辅助方法
+    int findRowByConfigId(const QString& configId);
+    void updateGlobalButtonStates();
+
+private:
     // ========================================
-    // UI 组件
+    // UI 组件 - 工具栏
     // ========================================
-    ElaLineEdit* _programLineEdit{ nullptr };      // 程序路径输入框
-    ElaPushButton* _browseButton{ nullptr };       // 浏览程序按钮
-    ElaLineEdit* _argumentsLineEdit{ nullptr };    // 参数输入框
-    ElaPushButton* _startButton{ nullptr };        // 启动按钮
-    ElaPushButton* _stopButton{ nullptr };         // 停止按钮
-    ElaPushButton* _clearButton{ nullptr };        // 清空日志按钮
-    ElaPlainTextEdit* _logTextEdit{ nullptr };     // 日志输出区域
-    ElaProgressBar* _statusBar{ nullptr };         // 状态指示条（可选）
+    ElaPushButton* _addProcessButton{ nullptr };
+    ElaPushButton* _startAllButton{ nullptr };
+    ElaPushButton* _stopAllButton{ nullptr };
+
+    // ========================================
+    // UI 组件 - 进程表格
+    // ========================================
+    ElaTableView* _processTable{ nullptr };
+    QStandardItemModel* _processTableModel{ nullptr };
+
+    // ========================================
+    // UI 组件 - 日志区域
+    // ========================================
+    ElaTabWidget* _logTabWidget{ nullptr };
+    ElaPlainTextEdit* _allLogTextEdit{ nullptr };
+    QMap<QString, ElaPlainTextEdit*> _logTextEdits;  // configId -> 日志编辑框
+    QMap<QString, int> _logTabIndices;               // configId -> Tab 索引
+
+    // ========================================
+    // UI 组件 - 底部按钮
+    // ========================================
+    ElaPushButton* _clearCurrentLogButton{ nullptr };
+    ElaPushButton* _clearAllLogButton{ nullptr };
 
     // ========================================
     // 数据管理
     // ========================================
-    QString _currentProjectName;                   // 当前项目名称
-    std::shared_ptr<ProcessRunner> _processRunner; // 进程运行器
-    bool _isRunning{ false };                      // 是否正在运行
+    QString _currentProjectName;
+    QList<ProcessRowData> _processData;  // 进程数据列表
 
     // 日志颜色方案
-    QMap<QString, QString> m_darkColors;           // 深色主题颜色
-    QMap<QString, QString> m_lightColors;          // 浅色主题颜色
+    QMap<QString, QString> m_darkColors;
+    QMap<QString, QString> m_lightColors;
 };
 
 } // namespace Prism

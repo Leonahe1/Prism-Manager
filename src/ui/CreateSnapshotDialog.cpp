@@ -66,6 +66,7 @@ void CreateSnapshotDialog::setupUI() {
 
     // 文件列表（使用滚动区域）
     QWidget* filesWidget = new QWidget(this);
+    filesWidget->setStyleSheet("background: transparent;");
     _filesLayout = new QVBoxLayout(filesWidget);
     _filesLayout->setSpacing(8);
     _filesLayout->setContentsMargins(10, 5, 10, 5);
@@ -75,7 +76,7 @@ void CreateSnapshotDialog::setupUI() {
         // 显示相对路径
         QString relativePath = QDir(_projectPath).relativeFilePath(filePath);
 
-        ElaCheckBox* checkBox = new ElaCheckBox(relativePath, this);
+        ElaCheckBox* checkBox = new ElaCheckBox(relativePath, filesWidget);
         checkBox->setChecked(true);
         checkBox->setProperty("filePath", filePath);  // 存储完整路径
         connect(checkBox, &ElaCheckBox::stateChanged, this, &CreateSnapshotDialog::onFileCheckBoxChanged);
