@@ -2,6 +2,11 @@
 #include <QTextCodec>
 #include <QDebug>
 #include "utils/EncodingUtils.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 namespace Prism {
 
 ProcessRunner::ProcessRunner(QObject* parent)
@@ -29,7 +34,7 @@ ProcessRunner::~ProcessRunner() {
     }
 }
 
-bool ProcessRunner::start(const QString& program, const QStringList& arguments, const QString& workingDirectory) {
+bool ProcessRunner::start(const QString& program, const QStringList& arguments, const QString& workingDirectory, bool showConsole) {
     if (isRunning()) {
         qWarning() << "[ProcessRunner] Process already running";
         return false;
@@ -43,12 +48,26 @@ bool ProcessRunner::start(const QString& program, const QStringList& arguments, 
         m_process->setWorkingDirectory(workingDirectory);
     }
 
-    // 合并标准输出和错误输出的通道（可选）
-    // m_process->setProcessChannelMode(QProcess::MergedChannels);
+#ifdef Q_OS_WIN
+    if (showConsole) {
+        // Windows: 显示控制台窗口
+        m_process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
+            args->flags |= CREATE_NEW_CONSOLE;
+            args->startupInfo->dwFlags &= ~STARTF_USESTDHANDLES;
+        });
+    } else {
+        // 默认：隐藏控制台窗口，捕获输出
+        m_process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
+            args->flags |= CREATE_NO_WINDOW;
+        });
+    }
+#else
+    Q_UNUSED(showConsole);
+#endif
 
     setState(ProcessState::NotStarted);
 
-    qDebug() << "[ProcessRunner] Starting:" << program << arguments;
+    qDebug() << "[ProcessRunner] Starting:" << program << arguments << "showConsole:" << showConsole;
     m_process->start(program, arguments);
 
     return true;
