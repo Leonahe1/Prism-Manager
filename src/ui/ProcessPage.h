@@ -52,6 +52,11 @@ public:
      */
     void setProjectName(const QString& projectName);
 
+    /**
+     * @brief 获取当前运行中的进程数量
+     */
+    int getRunningProcessCount() const;
+
 public slots:
     /**
      * @brief 添加新进程

@@ -841,4 +841,15 @@ void ProcessPage::updateGlobalButtonStates()
     _stopAllButton->setEnabled(hasRunning);
 }
 
+int ProcessPage::getRunningProcessCount() const
+{
+    int count = 0;
+    for (const auto& data : _processData) {
+        if (data.isRunning) {
+            count++;
+        }
+    }
+    return count;
+}
+
 } // namespace Prism
