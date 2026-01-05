@@ -238,7 +238,8 @@ void ProcessPage::editProcess(int row)
     }
 
     // 运行中不允许编辑
-    if (_processData[row].isRunning) {
+    auto status = _processData[row].currentStatus;
+    if (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting) {
         ElaMessageBar::warning(ElaMessageBarType::BottomRight, "警告",
                                "请先停止进程再编辑", 1500);
         return;
@@ -267,7 +268,8 @@ void ProcessPage::deleteProcess(int row)
     }
 
     // 运行中先停止
-    if (_processData[row].isRunning) {
+    auto status = _processData[row].currentStatus;
+    if (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting) {
         _processData[row].runner->stop(true);
         _processData[row].runner->waitForFinished(3000);
     }
@@ -290,7 +292,8 @@ void ProcessPage::startProcess(int row)
     }
 
     auto& data = _processData[row];
-    if (data.isRunning) {
+    auto status = data.currentStatus;
+    if (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting) {
         return;
     }
 
@@ -306,6 +309,11 @@ void ProcessPage::startProcess(int row)
         connectProcessSignals(row);
     }
 
+    // 设置为启动中状态
+    data.currentStatus = ProcessStatusIndicator::Status::Starting;
+    updateTableRow(row);
+    updateGlobalButtonStates();
+
     QStringList arguments;
     if (!data.config.arguments.isEmpty()) {
         arguments = data.config.arguments.split(' ', QString::SkipEmptyParts);
@@ -317,6 +325,10 @@ void ProcessPage::startProcess(int row)
     }
 
     if (!data.runner->start(data.config.program, arguments, data.config.workingDirectory, data.config.showConsole)) {
+        // 启动失败，恢复为错误状态
+        data.currentStatus = ProcessStatusIndicator::Status::Error;
+        updateTableRow(row);
+        updateGlobalButtonStates();
         appendLogToTab(data.config.id, "ERROR", "进程启动失败");
     }
 }
@@ -328,7 +340,9 @@ void ProcessPage::stopProcess(int row)
     }
 
     auto& data = _processData[row];
-    if (!data.isRunning || !data.runner) {
+    auto status = data.currentStatus;
+    bool isRunning = (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting);
+    if (!isRunning || !data.runner) {
         return;
     }
 
@@ -340,7 +354,9 @@ void ProcessPage::startAllProcesses()
 {
     int count = 0;
     for (int i = 0; i < _processData.size(); ++i) {
-        if (!_processData[i].isRunning && !_processData[i].config.program.isEmpty()) {
+        auto status = _processData[i].currentStatus;
+        bool isRunning = (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting);
+        if (!isRunning && !_processData[i].config.program.isEmpty()) {
             startProcess(i);
             count++;
         }
@@ -356,7 +372,9 @@ void ProcessPage::stopAllProcesses()
 {
     int count = 0;
     for (int i = 0; i < _processData.size(); ++i) {
-        if (_processData[i].isRunning) {
+        auto status = _processData[i].currentStatus;
+        bool isRunning = (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting);
+        if (isRunning) {
             stopProcess(i);
             count++;
         }
@@ -409,14 +427,14 @@ void ProcessPage::addTableRow(const ProcessConfig& config)
     // 添加数据
     ProcessRowData rowData;
     rowData.config = config;
-    rowData.isRunning = false;
+    rowData.currentStatus = ProcessStatusIndicator::Status::Stopped;
     _processData.append(rowData);
 
     // 创建行数据
     QList<QStandardItem*> items;
 
-    // 状态列
-    QStandardItem* statusItem = new QStandardItem("○ 停止");
+    // 状态列（占位，使用 widget 显示）
+    QStandardItem* statusItem = new QStandardItem();
     statusItem->setTextAlignment(Qt::AlignCenter);
     items.append(statusItem);
 
@@ -435,6 +453,17 @@ void ProcessPage::addTableRow(const ProcessConfig& config)
 
     _processTableModel->appendRow(items);
 
+    // 设置状态列的指示灯 widget（居中显示）
+    QWidget* statusContainer = new QWidget();
+    QHBoxLayout* statusLayout = new QHBoxLayout(statusContainer);
+    statusLayout->setContentsMargins(0, 0, 0, 0);
+    statusLayout->setAlignment(Qt::AlignCenter);
+    ProcessStatusIndicator* indicator = new ProcessStatusIndicator(statusContainer);
+    indicator->setStatus(ProcessStatusIndicator::Status::Stopped);
+    indicator->setToolTip(ProcessStatusIndicator::statusName(ProcessStatusIndicator::Status::Stopped));
+    statusLayout->addWidget(indicator);
+    _processTable->setIndexWidget(_processTableModel->index(row, COL_STATUS), statusContainer);
+
     // 设置操作列的 widget
     QWidget* opWidget = createOperationWidget(row);
     _processTable->setIndexWidget(_processTableModel->index(row, COL_OPERATION), opWidget);
@@ -450,12 +479,8 @@ void ProcessPage::updateTableRow(int row)
 
     const auto& data = _processData[row];
 
-    // 更新状态
-    QStandardItem* statusItem = _processTableModel->item(row, COL_STATUS);
-    if (statusItem) {
-        statusItem->setText(data.isRunning ? "● 运行" : "○ 停止");
-        statusItem->setForeground(data.isRunning ? QColor("#107C10") : QColor("#666666"));
-    }
+    // 更新状态指示灯
+    updateStatusIndicator(row, data.currentStatus);
 
     // 更新名称
     QStandardItem* nameItem = _processTableModel->item(row, COL_NAME);
@@ -471,7 +496,7 @@ void ProcessPage::updateTableRow(int row)
     }
 
     // 更新操作按钮状态
-    updateOperationButtons(row, data.isRunning);
+    updateOperationButtons(row, data.currentStatus);
 }
 
 void ProcessPage::removeTableRow(int row)
@@ -483,8 +508,20 @@ void ProcessPage::removeTableRow(int row)
     _processTableModel->removeRow(row);
     _processData.removeAt(row);
 
-    // 更新后续行的操作按钮（因为 row 索引变了）
+    // 更新后续行的 widget（因为 row 索引变了）
     for (int i = row; i < _processData.size(); ++i) {
+        // 重建状态指示灯（居中显示）
+        QWidget* statusContainer = new QWidget();
+        QHBoxLayout* statusLayout = new QHBoxLayout(statusContainer);
+        statusLayout->setContentsMargins(0, 0, 0, 0);
+        statusLayout->setAlignment(Qt::AlignCenter);
+        ProcessStatusIndicator* indicator = new ProcessStatusIndicator(statusContainer);
+        indicator->setStatus(_processData[i].currentStatus);
+        indicator->setToolTip(ProcessStatusIndicator::statusName(_processData[i].currentStatus));
+        statusLayout->addWidget(indicator);
+        _processTable->setIndexWidget(_processTableModel->index(i, COL_STATUS), statusContainer);
+
+        // 重建操作按钮
         QWidget* opWidget = createOperationWidget(i);
         _processTable->setIndexWidget(_processTableModel->index(i, COL_OPERATION), opWidget);
     }
@@ -497,7 +534,8 @@ QWidget* ProcessPage::createOperationWidget(int row)
     layout->setContentsMargins(5, 2, 5, 2);
     layout->setSpacing(5);
 
-    bool isRunning = (row < _processData.size()) ? _processData[row].isRunning : false;
+    auto status = (row < _processData.size()) ? _processData[row].currentStatus : ProcessStatusIndicator::Status::Stopped;
+    bool isRunning = (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting);
 
     ElaPushButton* startStopBtn = new ElaPushButton(isRunning ? "停止" : "启动", widget);
     startStopBtn->setFixedSize(50, 26);
@@ -520,7 +558,9 @@ QWidget* ProcessPage::createOperationWidget(int row)
     // 连接信号（使用 lambda 捕获当前行）
     connect(startStopBtn, &ElaPushButton::clicked, this, [this, row]() {
         if (row < _processData.size()) {
-            if (_processData[row].isRunning) {
+            auto status = _processData[row].currentStatus;
+            bool isRunning = (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting);
+            if (isRunning) {
                 stopProcess(row);
             } else {
                 startProcess(row);
@@ -539,12 +579,14 @@ QWidget* ProcessPage::createOperationWidget(int row)
     return widget;
 }
 
-void ProcessPage::updateOperationButtons(int row, bool isRunning)
+void ProcessPage::updateOperationButtons(int row, ProcessStatusIndicator::Status status)
 {
     QWidget* widget = _processTable->indexWidget(_processTableModel->index(row, COL_OPERATION));
     if (!widget) {
         return;
     }
+
+    bool isRunning = (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting);
 
     ElaPushButton* startStopBtn = widget->findChild<ElaPushButton*>("startStopBtn");
     ElaPushButton* editBtn = widget->findChild<ElaPushButton*>("editBtn");
@@ -554,6 +596,18 @@ void ProcessPage::updateOperationButtons(int row, bool isRunning)
     }
     if (editBtn) {
         editBtn->setEnabled(!isRunning);
+    }
+}
+
+void ProcessPage::updateStatusIndicator(int row, ProcessStatusIndicator::Status status)
+{
+    QWidget* container = _processTable->indexWidget(_processTableModel->index(row, COL_STATUS));
+    if (container) {
+        ProcessStatusIndicator* indicator = container->findChild<ProcessStatusIndicator*>();
+        if (indicator) {
+            indicator->setStatus(status);
+            indicator->setToolTip(ProcessStatusIndicator::statusName(status));
+        }
     }
 }
 
@@ -593,6 +647,20 @@ void ProcessPage::connectProcessSignals(int row)
             [this, configId](const QString& error) {
         onProcessOutput(configId, error, true);
     });
+
+    // 监听状态变化以处理 Killed 状态
+    connect(data.runner.get(), &ProcessRunner::stateChanged, this,
+            [this, configId](ProcessRunner::ProcessState state) {
+        if (state == ProcessRunner::ProcessState::Killed) {
+            int row = findRowByConfigId(configId);
+            if (row >= 0) {
+                _processData[row].currentStatus = ProcessStatusIndicator::Status::Killed;
+                updateTableRow(row);
+                updateGlobalButtonStates();
+                appendLogToTab(configId, "WARNING", "进程已被强制终止");
+            }
+        }
+    });
 }
 
 void ProcessPage::onProcessStarted(const QString& configId)
@@ -600,7 +668,7 @@ void ProcessPage::onProcessStarted(const QString& configId)
     int row = findRowByConfigId(configId);
     if (row < 0) return;
 
-    _processData[row].isRunning = true;
+    _processData[row].currentStatus = ProcessStatusIndicator::Status::Running;
     updateTableRow(row);
     updateGlobalButtonStates();
 
@@ -613,15 +681,25 @@ void ProcessPage::onProcessFinished(const QString& configId, int exitCode, QProc
     int row = findRowByConfigId(configId);
     if (row < 0) return;
 
-    _processData[row].isRunning = false;
-    updateTableRow(row);
-    updateGlobalButtonStates();
-
+    // 根据退出状态设置不同的指示灯颜色
     if (status == QProcess::NormalExit) {
-        appendLogToTab(configId, "PROCESS", QString("进程退出，退出码: %1").arg(exitCode));
+        if (exitCode == 0) {
+            // 正常退出（退出码为0）
+            _processData[row].currentStatus = ProcessStatusIndicator::Status::Stopped;
+            appendLogToTab(configId, "PROCESS", QString("进程正常退出，退出码: %1").arg(exitCode));
+        } else {
+            // 正常退出但退出码非0，视为错误
+            _processData[row].currentStatus = ProcessStatusIndicator::Status::Error;
+            appendLogToTab(configId, "WARNING", QString("进程退出，退出码: %1").arg(exitCode));
+        }
     } else {
+        // 崩溃退出
+        _processData[row].currentStatus = ProcessStatusIndicator::Status::Error;
         appendLogToTab(configId, "ERROR", "进程异常崩溃");
     }
+
+    updateTableRow(row);
+    updateGlobalButtonStates();
 
     emit processStopped(_currentProjectName, _processData[row].config.name, exitCode);
 }
@@ -829,7 +907,8 @@ void ProcessPage::updateGlobalButtonStates()
     bool hasConfigured = false;
 
     for (const auto& data : _processData) {
-        if (data.isRunning) {
+        auto status = data.currentStatus;
+        if (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting) {
             hasRunning = true;
         }
         if (!data.config.program.isEmpty()) {
@@ -845,7 +924,8 @@ int ProcessPage::getRunningProcessCount() const
 {
     int count = 0;
     for (const auto& data : _processData) {
-        if (data.isRunning) {
+        auto status = data.currentStatus;
+        if (status == ProcessStatusIndicator::Status::Running || status == ProcessStatusIndicator::Status::Starting) {
             count++;
         }
     }

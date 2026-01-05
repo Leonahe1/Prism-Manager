@@ -3,6 +3,7 @@
 
 #include "BasePage.h"
 #include "ProcessEditDialog.h"
+#include "ProcessStatusIndicator.h"
 #include "ElaDef.h"
 #include <QString>
 #include <QProcess>
@@ -28,7 +29,7 @@ class ProcessRunner;
 struct ProcessRowData {
     ProcessConfig config;
     std::shared_ptr<ProcessRunner> runner;
-    bool isRunning{ false };
+    ProcessStatusIndicator::Status currentStatus{ ProcessStatusIndicator::Status::Stopped };
 };
 
 /**
@@ -124,7 +125,8 @@ private:
     void updateTableRow(int row);
     void removeTableRow(int row);
     QWidget* createOperationWidget(int row);
-    void updateOperationButtons(int row, bool isRunning);
+    void updateOperationButtons(int row, ProcessStatusIndicator::Status status);
+    void updateStatusIndicator(int row, ProcessStatusIndicator::Status status);
 
     // 进程管理
     void connectProcessSignals(int row);
