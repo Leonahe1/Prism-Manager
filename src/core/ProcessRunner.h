@@ -18,6 +18,7 @@ class ProcessRunner : public QObject {
 public:
     enum class ProcessState {
         NotStarted,
+        Starting,   // 启动中（新增）
         Running,
         Finished,
         Error,

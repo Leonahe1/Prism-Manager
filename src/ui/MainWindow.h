@@ -99,6 +99,37 @@ public:
      */
     void reloadCurrentProject();
 
+    /**
+     * @brief 获取所有已打开的项目列表
+     */
+    QList<ProjectInfo> getAllProjects() const;
+
+    /**
+     * @brief 获取已打开项目数量
+     */
+    int getOpenedProjectsCount() const;
+
+    /**
+     * @brief 获取所有配置文件总数
+     */
+    int getTotalConfigFilesCount() const;
+
+    /**
+     * @brief 获取运行中的进程数量
+     */
+    int getRunningProcessCount() const;
+
+    /**
+     * @brief 获取项目配置页面的导航 Key
+     */
+    QString getProjectConfigPageKey(const QString& projectId) const;
+
+Q_SIGNALS:
+    /**
+     * @brief 项目数据变化信号（添加/移除/修改项目时发出）
+     */
+    void projectDataChanged();
+
 private slots:
     // ========================================
     // 菜单栏槽函数

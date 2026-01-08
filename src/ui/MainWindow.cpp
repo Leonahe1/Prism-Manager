@@ -317,6 +317,11 @@ namespace Prism {
         // ========================================
         connect(this, &ElaWindow::navigationNodeClicked, this,
                 [=](ElaNavigationType::NavigationNodeType nodeType, QString nodeKey) {
+                    // 刷新首页数据（当导航到首页时）
+                    if (_homePage && nodeKey == _homePage->property("ElaPageKey").toString()) {
+                        _homePage->refreshData();
+                    }
+
                     // 处理特殊节点点击
                     if (nodeKey == _settingKey)
                     {
@@ -485,6 +490,7 @@ namespace Prism {
             appendLog("SUCCESS", QString("项目已导入: \"%1\" (%2)").arg(info.name, projectPath));
         }
 
+        emit projectDataChanged();
         return projectId;
     }
 
@@ -541,6 +547,8 @@ namespace Prism {
         appendLog("WARNING", QString("项目已从列表移除: \"%1\"").arg(projectName));
         ElaMessageBar::information(ElaMessageBarType::BottomRight, "信息",
                                    QString("项目已移除: %1").arg(projectName), 2000);
+
+        emit projectDataChanged();
     }
 
     void MainWindow::deactivateProject(const QString &projectId)
@@ -1058,6 +1066,47 @@ namespace Prism {
         }
 
         appendLog("INFO", QString("项目 \"%1\" 已重新加载").arg(project.name));
+    }
+
+    QList<ProjectInfo> MainWindow::getAllProjects() const
+    {
+        return _openedProjects.values();
+    }
+
+    int MainWindow::getOpenedProjectsCount() const
+    {
+        return _openedProjects.size();
+    }
+
+    int MainWindow::getTotalConfigFilesCount() const
+    {
+        int total = 0;
+        for (const auto& project : _openedProjects) {
+            total += project.configFiles.size();
+        }
+        return total;
+    }
+
+    int MainWindow::getRunningProcessCount() const
+    {
+        int count = 0;
+        for (auto it = _projectProcessPages.constBegin();
+             it != _projectProcessPages.constEnd(); ++it) {
+            ProcessPage* page = qobject_cast<ProcessPage*>(it.value());
+            if (page) {
+                count += page->getRunningProcessCount();
+            }
+        }
+        return count;
+    }
+
+    QString MainWindow::getProjectConfigPageKey(const QString& projectId) const
+    {
+        if (_projectConfigPages.contains(projectId)) {
+            QWidget* page = _projectConfigPages[projectId];
+            return page->property("ElaPageKey").toString();
+        }
+        return QString();
     }
 
 } // namespace Prism

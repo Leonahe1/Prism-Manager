@@ -41,6 +41,8 @@ set(PRISM_SOURCES
     ui/CreateSnapshotDialog.cpp
     ui/ProcessEditDialog.h
     ui/ProcessEditDialog.cpp
+    ui/ProcessStatusIndicator.h
+    ui/ProcessStatusIndicator.cpp
     # Utils
     utils/EncodingUtils.h
     utils/EncodingUtils.cpp
