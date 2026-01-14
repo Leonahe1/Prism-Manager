@@ -22,6 +22,7 @@ class QStandardItemModel;
 namespace Prism {
 
 class ProcessRunner;
+class LogToolBar;
 
 /**
  * @brief 进程表格行数据
@@ -30,6 +31,16 @@ struct ProcessRowData {
     ProcessConfig config;
     std::shared_ptr<ProcessRunner> runner;
     ProcessStatusIndicator::Status currentStatus{ ProcessStatusIndicator::Status::Stopped };
+};
+
+/**
+ * @brief 日志条目结构
+ */
+struct LogEntry {
+    QString timestamp;
+    QString level;
+    QString configId;
+    QString message;
 };
 
 /**
@@ -108,6 +119,21 @@ public slots:
      */
     void clearAllLogs();
 
+    /**
+     * @brief 设置日志过滤级别
+     */
+    void setLogFilter(const QStringList& levels);
+
+    /**
+     * @brief 搜索日志
+     */
+    void searchLogs(const QString& keyword);
+
+    /**
+     * @brief 导出日志
+     */
+    void exportLogs();
+
 signals:
     void processStarted(const QString& projectName, const QString& processName);
     void processStopped(const QString& projectName, const QString& processName, int exitCode);
@@ -144,6 +170,14 @@ private:
     void appendLogToTab(const QString& configId, const QString& level, const QString& message);
     void updateLogStyle(ElaPlainTextEdit* textEdit);
 
+    // 日志增强
+    void trimLogLines(ElaPlainTextEdit* textEdit);
+    void refreshLogDisplay();
+    void highlightSearchResults(ElaPlainTextEdit* textEdit, const QString& keyword);
+    void clearSearchHighlight(ElaPlainTextEdit* textEdit);
+    void storeLogEntry(const QString& configId, const QString& level, const QString& message);
+    bool shouldShowLogEntry(const LogEntry& entry) const;
+
     // 持久化
     void saveProcessConfig();
     void loadProcessConfig();
@@ -169,6 +203,7 @@ private:
     // ========================================
     // UI 组件 - 日志区域
     // ========================================
+    LogToolBar* _logToolBar{ nullptr };
     ElaTabWidget* _logTabWidget{ nullptr };
     ElaPlainTextEdit* _allLogTextEdit{ nullptr };
     QMap<QString, ElaPlainTextEdit*> _logTextEdits;  // configId -> 日志编辑框
@@ -189,6 +224,12 @@ private:
     // 日志颜色方案
     QMap<QString, QString> m_darkColors;
     QMap<QString, QString> m_lightColors;
+
+    // 日志增强数据
+    QList<LogEntry> _logBuffer;           // 日志缓存
+    QStringList _activeFilterLevels;      // 当前过滤级别
+    QString _searchKeyword;               // 搜索关键字
+    static const int MAX_LOG_LINES = 10000;  // 最大日志行数
 };
 
 } // namespace Prism

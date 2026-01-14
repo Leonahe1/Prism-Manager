@@ -43,6 +43,23 @@ set(PRISM_SOURCES
     ui/ProcessEditDialog.cpp
     ui/ProcessStatusIndicator.h
     ui/ProcessStatusIndicator.cpp
+
+    # UI - Syntax Highlighters
+    ui/syntax/SyntaxHighlighter.h
+    ui/syntax/SyntaxHighlighter.cpp
+    ui/syntax/IniHighlighter.h
+    ui/syntax/IniHighlighter.cpp
+    ui/syntax/JsonHighlighter.h
+    ui/syntax/JsonHighlighter.cpp
+    ui/syntax/YamlHighlighter.h
+    ui/syntax/YamlHighlighter.cpp
+
+    # UI - Components
+    ui/components/CodeEditor.h
+    ui/components/CodeEditor.cpp
+    ui/components/LogToolBar.h
+    ui/components/LogToolBar.cpp
+
     # Utils
     utils/EncodingUtils.h
     utils/EncodingUtils.cpp
@@ -112,6 +129,8 @@ target_include_directories(Prism PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/core
     ${CMAKE_CURRENT_SOURCE_DIR}/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/syntax
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/components
     ${CMAKE_CURRENT_SOURCE_DIR}/utils
 )
 

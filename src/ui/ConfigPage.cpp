@@ -39,6 +39,11 @@
 #include "ElaContentDialog.h"
 #include "ElaMenu.h"
 
+// 语法高亮器
+#include "syntax/IniHighlighter.h"
+#include "syntax/JsonHighlighter.h"
+#include "syntax/YamlHighlighter.h"
+
 #include <QDesktopServices>
 #include <QUrl>
 #include "JsonParser.h"
@@ -569,6 +574,9 @@ namespace Prism {
         _saveButton->setEnabled(false);
         _addItemButton->setEnabled(true);  // 启用"添加新配置项"按钮
 
+        // 更新语法高亮器
+        updateSyntaxHighlighter(format);
+
         // 如果当前是组件模式，同步到表单
         if (_currentMode == EditMode::Form)
         {
@@ -925,6 +933,27 @@ namespace Prism {
     void ConfigPage::updateSyntaxHighlighter(const QString &format)
     {
         qDebug() << "更新语法高亮器:" << format;
+
+        // 删除旧的高亮器
+        if (_syntaxHighlighter) {
+            delete _syntaxHighlighter;
+            _syntaxHighlighter = nullptr;
+        }
+
+        // 根据格式创建对应的高亮器
+        if (format == "json") {
+            _syntaxHighlighter = new JsonHighlighter(_configEditor->document());
+        } else if (format == "yaml" || format == "yml") {
+            _syntaxHighlighter = new YamlHighlighter(_configEditor->document());
+        } else if (format == "ini" || format == "conf" || format == "cfg") {
+            _syntaxHighlighter = new IniHighlighter(_configEditor->document());
+        }
+
+        // 设置主题
+        if (_syntaxHighlighter) {
+            bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+            _syntaxHighlighter->setTheme(isDark);
+        }
     }
 
     ConfigItem ConfigPage::variantToConfigItem(const QVariant& variant)
@@ -2095,6 +2124,11 @@ namespace Prism {
 
         // 更新分割器
         _mainSplitter->setStyleSheet(getSplitterAndScrollBarStyleSheet());
+
+        // 更新语法高亮器主题
+        if (_syntaxHighlighter) {
+            _syntaxHighlighter->setTheme(isDark);
+        }
     }
 
     QString ConfigPage::updateJsonInPlace(const QVariantMap& flatData)
