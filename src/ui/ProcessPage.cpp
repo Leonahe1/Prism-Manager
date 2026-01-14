@@ -1,6 +1,7 @@
 #include "ProcessPage.h"
 #include "ProcessEditDialog.h"
 #include "core/ProcessRunner.h"
+#include "components/LogToolBar.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -8,12 +9,15 @@
 #include <QStandardItemModel>
 #include <QDateTime>
 #include <QTextCursor>
+#include <QTextBlock>
 #include <QDebug>
 #include <QSettings>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QUuid>
+#include <QFileDialog>
+#include <QTextStream>
 
 #include "ElaPlainTextEdit.h"
 #include "ElaPushButton.h"
@@ -152,6 +156,13 @@ void ProcessPage::initUI()
     logTitle->setTextPixelSize(16);
     mainLayout->addWidget(logTitle);
 
+    // 日志工具栏
+    _logToolBar = new LogToolBar(centralWidget);
+    mainLayout->addWidget(_logToolBar);
+
+    // 初始化过滤级别
+    _activeFilterLevels = _logToolBar->getFilterLevels();
+
     _logTabWidget = new ElaTabWidget(centralWidget);
     _logTabWidget->setTabsClosable(false);
     _logTabWidget->setMovable(false);
@@ -195,6 +206,12 @@ void ProcessPage::setupConnections()
     connect(_stopAllButton, &ElaPushButton::clicked, this, &ProcessPage::stopAllProcesses);
     connect(_clearCurrentLogButton, &ElaPushButton::clicked, this, &ProcessPage::clearCurrentLog);
     connect(_clearAllLogButton, &ElaPushButton::clicked, this, &ProcessPage::clearAllLogs);
+
+    // 日志工具栏连接
+    connect(_logToolBar, &LogToolBar::filterChanged, this, &ProcessPage::setLogFilter);
+    connect(_logToolBar, &LogToolBar::searchRequested, this, &ProcessPage::searchLogs);
+    connect(_logToolBar, &LogToolBar::exportRequested, this, &ProcessPage::exportLogs);
+    connect(_logToolBar, &LogToolBar::clearRequested, this, &ProcessPage::clearCurrentLog);
 }
 
 void ProcessPage::setProjectName(const QString& projectName)
@@ -776,6 +793,9 @@ void ProcessPage::appendLog(ElaPlainTextEdit* textEdit, const QString& level, co
 
     textEdit->appendHtml(logLine);
 
+    // 行数限制
+    trimLogLines(textEdit);
+
     QTextCursor cursor = textEdit->textCursor();
     cursor.movePosition(QTextCursor::End);
     textEdit->setTextCursor(cursor);
@@ -783,6 +803,20 @@ void ProcessPage::appendLog(ElaPlainTextEdit* textEdit, const QString& level, co
 
 void ProcessPage::appendLogToTab(const QString& configId, const QString& level, const QString& message)
 {
+    // 存储日志条目
+    storeLogEntry(configId, level, message);
+
+    // 检查是否应该显示
+    LogEntry entry;
+    entry.timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    entry.level = level;
+    entry.configId = configId;
+    entry.message = message;
+
+    if (!shouldShowLogEntry(entry)) {
+        return;
+    }
+
     // 追加到对应进程的日志
     if (_logTextEdits.contains(configId)) {
         appendLog(_logTextEdits[configId], level, message);
@@ -930,6 +964,208 @@ int ProcessPage::getRunningProcessCount() const
         }
     }
     return count;
+}
+
+// ========================================
+// 日志增强方法
+// ========================================
+
+void ProcessPage::trimLogLines(ElaPlainTextEdit* textEdit)
+{
+    if (!textEdit) return;
+
+    QTextDocument* doc = textEdit->document();
+    while (doc->blockCount() > MAX_LOG_LINES) {
+        QTextCursor cursor(doc->begin());
+        cursor.select(QTextCursor::BlockUnderCursor);
+        cursor.removeSelectedText();
+        cursor.deleteChar();  // 删除换行符
+    }
+}
+
+void ProcessPage::storeLogEntry(const QString& configId, const QString& level, const QString& message)
+{
+    LogEntry entry;
+    entry.timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    entry.level = level;
+    entry.configId = configId;
+    entry.message = message;
+
+    _logBuffer.append(entry);
+
+    // 限制缓存大小
+    while (_logBuffer.size() > MAX_LOG_LINES * 2) {
+        _logBuffer.removeFirst();
+    }
+}
+
+bool ProcessPage::shouldShowLogEntry(const LogEntry& entry) const
+{
+    return _activeFilterLevels.contains(entry.level);
+}
+
+void ProcessPage::setLogFilter(const QStringList& levels)
+{
+    _activeFilterLevels = levels;
+    refreshLogDisplay();
+}
+
+void ProcessPage::searchLogs(const QString& keyword)
+{
+    _searchKeyword = keyword;
+
+    if (keyword.isEmpty()) {
+        // 清除所有高亮
+        clearSearchHighlight(_allLogTextEdit);
+        for (auto* textEdit : _logTextEdits.values()) {
+            clearSearchHighlight(textEdit);
+        }
+    } else {
+        // 高亮搜索结果
+        highlightSearchResults(_allLogTextEdit, keyword);
+        for (auto* textEdit : _logTextEdits.values()) {
+            highlightSearchResults(textEdit, keyword);
+        }
+    }
+}
+
+void ProcessPage::exportLogs()
+{
+    QString fileName = QFileDialog::getSaveFileName(
+        this,
+        "导出日志",
+        QString("%1_logs_%2.txt")
+            .arg(_currentProjectName)
+            .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss")),
+        "文本文件 (*.txt);;所有文件 (*.*)"
+    );
+
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        ElaMessageBar::error(ElaMessageBarType::BottomRight, "错误",
+                             QString("无法创建文件: %1").arg(fileName), 2000);
+        return;
+    }
+
+    QTextStream out(&file);
+    out.setCodec("UTF-8");
+
+    // 导出缓存的日志
+    for (const LogEntry& entry : _logBuffer) {
+        QString line = QString("[%1] [%2] [%3] %4")
+                           .arg(entry.timestamp)
+                           .arg(entry.level)
+                           .arg(entry.configId.isEmpty() ? "SYSTEM" : entry.configId)
+                           .arg(entry.message);
+        out << line << "\n";
+    }
+
+    file.close();
+
+    ElaMessageBar::success(ElaMessageBarType::BottomRight, "成功",
+                           QString("日志已导出: %1").arg(fileName), 2000);
+}
+
+void ProcessPage::refreshLogDisplay()
+{
+    // 清空当前显示
+    _allLogTextEdit->clear();
+    for (auto* textEdit : _logTextEdits.values()) {
+        textEdit->clear();
+    }
+
+    // 根据过滤条件重新显示日志
+    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+    QMap<QString, QString>& colors = isDark ? m_darkColors : m_lightColors;
+
+    for (const LogEntry& entry : _logBuffer) {
+        if (!shouldShowLogEntry(entry)) {
+            continue;
+        }
+
+        QString color = colors.value(entry.level, isDark ? "#D4D4D4" : "#323130");
+
+        // 追加到对应进程的日志
+        if (_logTextEdits.contains(entry.configId)) {
+            QString logLine = QString("<span style='color: %1;'>[%2] [%3] %4</span>")
+                                  .arg(color).arg(entry.timestamp).arg(entry.level)
+                                  .arg(entry.message.toHtmlEscaped());
+            _logTextEdits[entry.configId]->appendHtml(logLine);
+        }
+
+        // 同时追加到"全部"日志
+        int row = findRowByConfigId(entry.configId);
+        QString processName = (row >= 0) ? _processData[row].config.name : "System";
+        QString prefixedMessage = QString("[%1] %2").arg(processName).arg(entry.message);
+        QString allLogLine = QString("<span style='color: %1;'>[%2] [%3] %4</span>")
+                                 .arg(color).arg(entry.timestamp).arg(entry.level)
+                                 .arg(prefixedMessage.toHtmlEscaped());
+        _allLogTextEdit->appendHtml(allLogLine);
+    }
+
+    // 滚动到底部
+    QTextCursor cursor = _allLogTextEdit->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    _allLogTextEdit->setTextCursor(cursor);
+
+    // 如果有搜索关键字，重新高亮
+    if (!_searchKeyword.isEmpty()) {
+        highlightSearchResults(_allLogTextEdit, _searchKeyword);
+        for (auto* textEdit : _logTextEdits.values()) {
+            highlightSearchResults(textEdit, _searchKeyword);
+        }
+    }
+}
+
+void ProcessPage::highlightSearchResults(ElaPlainTextEdit* textEdit, const QString& keyword)
+{
+    if (!textEdit || keyword.isEmpty()) return;
+
+    // 先清除之前的高亮
+    clearSearchHighlight(textEdit);
+
+    QTextDocument* doc = textEdit->document();
+    QTextCursor cursor(doc);
+
+    // 高亮格式
+    QTextCharFormat highlightFormat;
+    highlightFormat.setBackground(QColor("#FFFF00"));  // 黄色背景
+    highlightFormat.setForeground(QColor("#000000"));  // 黑色文字
+
+    // 查找所有匹配
+    while (!cursor.isNull() && !cursor.atEnd()) {
+        cursor = doc->find(keyword, cursor, QTextDocument::FindCaseSensitively);
+        if (!cursor.isNull()) {
+            cursor.mergeCharFormat(highlightFormat);
+        }
+    }
+
+    // 滚动到第一个匹配
+    QTextCursor firstMatch = doc->find(keyword);
+    if (!firstMatch.isNull()) {
+        textEdit->setTextCursor(firstMatch);
+        textEdit->ensureCursorVisible();
+    }
+}
+
+void ProcessPage::clearSearchHighlight(ElaPlainTextEdit* textEdit)
+{
+    if (!textEdit) return;
+
+    // 选择全部文本并清除格式
+    QTextCursor cursor = textEdit->textCursor();
+    cursor.select(QTextCursor::Document);
+
+    QTextCharFormat defaultFormat;
+    // 不设置背景颜色，保持原有的 HTML 格式
+    cursor.setCharFormat(defaultFormat);
+    cursor.clearSelection();
+
+    textEdit->setTextCursor(cursor);
 }
 
 } // namespace Prism

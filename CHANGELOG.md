@@ -1,7 +1,78 @@
 # Prism 更新日志
 
 > **项目代号**: Prism (寓意：将混沌的配置像棱镜一样解析得清晰分明)
-> **最后更新**: 2026-01-06
+> **最后更新**: 2026-01-15
+
+---
+
+## v1.0.0-alpha (2026-01-15)
+
+### 新功能 - 配置文件语法高亮 🎨
+
+#### 语法高亮器
+- **SyntaxHighlighter 基类**: 可扩展的语法高亮框架，支持主题切换
+- **IniHighlighter**: INI 格式语法高亮
+  - Section 高亮: `[section]` - 蓝色/青色
+  - 键值对: key=value - 默认色/绿色
+  - 注释高亮: `;comment` / `#comment` - 灰色
+- **JsonHighlighter**: JSON 格式语法高亮
+  - 键名: `"key":` - 蓝色
+  - 字符串: `"value"` - 绿色
+  - 数字: `123` - 橙色
+  - 布尔值: `true/false` - 紫色
+  - Null: `null` - 红色
+- **YamlHighlighter**: YAML 格式语法高亮
+  - 键名: `key:` - 蓝色
+  - 字符串/数字/布尔值 - 绿色/橙色/紫色
+  - 列表标记: `-` - 黄色
+  - 注释: `#comment` - 灰色
+
+#### 代码编辑器组件
+- **CodeEditor**: 带行号显示的代码编辑器
+  - 行号区域: 自动计算宽度，随滚动更新
+  - 当前行高亮: 浅色背景突出显示
+  - 主题自适应: 支持 Dark/Light 模式切换
+
+#### 技术实现
+- 基于 `QSyntaxHighlighter` 实现，使用正则表达式匹配语法元素
+- 颜色方案区分深色/浅色主题，自动响应 `ElaTheme::themeModeChanged` 信号
+- `CodeEditor` 继承自 `QPlainTextEdit`，内嵌 `LineNumberArea` 子组件
+
+### 新功能 - 日志增强功能 📋
+
+#### 日志工具栏 (LogToolBar)
+- **级别过滤**: 7 个复选框，支持按日志级别过滤
+  - INFO / SUCCESS / WARNING / ERROR / DEBUG / STDOUT / STDERR
+- **关键字搜索**: 实时搜索日志内容，匹配文本黄色高亮
+- **导出功能**: 导出为 UTF-8 编码的 .txt 文件
+- **清空功能**: 一键清空当前日志
+
+#### 日志过滤与搜索
+- **日志缓存**: 保存所有日志条目，支持重新过滤显示
+- **实时过滤**: 切换过滤条件后立即刷新日志显示
+- **搜索高亮**: 使用 `QTextCharFormat` 设置黄色背景高亮匹配文本
+- **滚动定位**: 搜索后自动滚动到第一个匹配位置
+
+#### 日志导出
+- **文件格式**: 纯文本 (.txt)，UTF-8 编码
+- **内容格式**: `[时间戳] [级别] [进程ID] 消息`
+- **文件命名**: `{项目名}_logs_{日期时间}.txt`
+
+#### 日志行数限制
+- **最大行数**: 10000 行（可配置）
+- **自动清理**: 超过限制时自动删除最旧的日志行
+- **性能保护**: 防止大量日志导致内存溢出
+
+#### 修改文件
+- `src/ui/syntax/SyntaxHighlighter.h/cpp` - 新建语法高亮基类
+- `src/ui/syntax/IniHighlighter.h/cpp` - 新建 INI 高亮器
+- `src/ui/syntax/JsonHighlighter.h/cpp` - 新建 JSON 高亮器
+- `src/ui/syntax/YamlHighlighter.h/cpp` - 新建 YAML 高亮器
+- `src/ui/components/CodeEditor.h/cpp` - 新建代码编辑器组件
+- `src/ui/components/LogToolBar.h/cpp` - 新建日志工具栏组件
+- `src/ui/ConfigPage.h/cpp` - 集成语法高亮器
+- `src/ui/ProcessPage.h/cpp` - 集成日志增强功能
+- `src/CMakeLists.txt` - 添加新文件到构建系统
 
 ---
 

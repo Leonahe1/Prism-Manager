@@ -30,6 +30,7 @@ class ElaRadioButton;
 namespace Prism {
 
 class ConfigParser;
+class SyntaxHighlighter;
 
 /**
  * @brief 配置值类型枚举
@@ -441,6 +442,7 @@ private:
 
     // 源码模式
     ElaPlainTextEdit* _configEditor{ nullptr };
+    SyntaxHighlighter* _syntaxHighlighter{ nullptr };  // 语法高亮器
 
     // 组件模式
     QScrollArea* _formScrollArea{ nullptr };
