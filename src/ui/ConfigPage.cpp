@@ -581,6 +581,10 @@ namespace Prism {
         if (_currentMode == EditMode::Form)
         {
             syncSourceToForm();
+            // 重要：在表单初始化完成后重置修改标志
+            // 因为创建控件和设置初始值不算用户修改
+            _isModified = false;
+            _saveButton->setEnabled(false);
         }
 
         QString fileName = filePath.section('/', -1);

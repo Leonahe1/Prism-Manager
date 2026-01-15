@@ -21,6 +21,8 @@ set(PRISM_SOURCES
     core/ProjectManager.cpp
     core/SnapshotManager.h
     core/SnapshotManager.cpp
+    core/AppSettings.h
+    core/AppSettings.cpp
 
     # UI
     ui/MainWindow.h
@@ -29,6 +31,8 @@ set(PRISM_SOURCES
     ui/HomePage.cpp
     ui/BasePage.h
     ui/BasePage.cpp
+    ui/SettingsPage.h
+    ui/SettingsPage.cpp
     ui/ConfigPage.h
     ui/ConfigPage.cpp
     ui/AddConfigItemDialog.h

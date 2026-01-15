@@ -5,6 +5,7 @@
 #include "ConfigPage.h"
 #include "ProcessPage.h"
 #include "SnapshotPage.h"
+#include "SettingsPage.h"
 
 // ElaWidgetTools 组件
 #include "ElaContentDialog.h"
@@ -224,19 +225,6 @@ namespace Prism {
         connect(openButton, &ElaToolButton::clicked, this, &MainWindow::onImportProject);
         toolBar->addWidget(openButton);
 
-        toolBar->addSeparator();
-
-        ElaToolButton *runButton = new ElaToolButton(this);
-        runButton->setElaIcon(ElaIconType::Play);
-        runButton->setToolTip("运行 (F5)");
-        runButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        toolBar->addWidget(runButton);
-
-        ElaToolButton *stopButton = new ElaToolButton(this);
-        stopButton->setElaIcon(ElaIconType::Stop);
-        stopButton->setToolTip("停止 (Shift+F5)");
-        toolBar->addWidget(stopButton);
-
         this->addToolBar(Qt::TopToolBarArea, toolBar);
 
         // ========================================
@@ -283,7 +271,7 @@ namespace Prism {
         // 创建通用页面实例
         // ========================================
         _homePage = new HomePage(this);
-        _settingPage = new BasePage(this);
+        _settingPage = new SettingsPage(this);
 
         // ========================================
         // 注册顶级导航节点
