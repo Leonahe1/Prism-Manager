@@ -19,6 +19,8 @@ class BasePage;
 
 namespace Prism {
 
+class SettingsPage;
+
 class ProjectManager;
 class ProcessRunner;
 
@@ -155,7 +157,7 @@ private:
     // 页面管理
     // ========================================
     HomePage* _homePage{ nullptr };
-    BasePage* _settingPage{ nullptr };
+    SettingsPage* _settingPage{ nullptr };
 
     // ========================================
     // 多项目管理数据结构
