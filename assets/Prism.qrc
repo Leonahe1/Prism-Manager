@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/Resource">
+        <file>Image/avatar.png</file>
+        <file>Image/icon.png</file>
+        <file>Image/GTTC_Program_Icon.ico</file>
+    </qresource>
+</RCC>

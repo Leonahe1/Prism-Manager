@@ -656,20 +656,53 @@ namespace Prism {
                                    "没有打开的配置文件", 1500);
             return;
         }
-
         if (_isModified)
         {
-            QMessageBox::StandardButton reply;
-            reply = QMessageBox::question(this, "重新加载确认",
-                                          "当前文件已修改，重新加载将丢失未保存的更改。\n确定要继续吗？",
-                                          QMessageBox::Yes | QMessageBox::No);
-            if (reply == QMessageBox::No)
-            {
-                return;
-            }
-        }
+            ElaContentDialog* reloadDialog = new ElaContentDialog(this);
+            reloadDialog->setWindowTitle("重新加载确认");
+            reloadDialog->setLeftButtonText("取消");
+            reloadDialog->setMiddleButtonText("");  // 设置为空文本
+            reloadDialog->setRightButtonText("确认");
 
-        openConfigFile(_currentFilePath);
+            // 手动隐藏中间按钮（ElaContentDialog 没有提供直接隐藏的方法）
+            // 通过查找子控件来隐藏中间按钮
+            QList<ElaPushButton*> buttons = reloadDialog->findChildren<ElaPushButton*>();
+            if (buttons.size() >= 3) {
+                buttons[1]->setVisible(false);  // 中间按钮是第二个按钮
+            }
+
+            // 创建对话框内容
+            QWidget* contentWidget = new QWidget(reloadDialog);
+            QVBoxLayout* contentLayout = new QVBoxLayout(contentWidget);
+            contentLayout->setContentsMargins(20, 20, 20, 20);
+
+            ElaText* messageText = new ElaText(contentWidget);
+            messageText->setText(QString("当前文件已修改，重新加载将丢失未保存的更改。"));
+            messageText->setTextPixelSize(15);
+
+            ElaText* warningText = new ElaText(contentWidget);
+            warningText->setText("⚠ 确定要继续吗？");
+            warningText->setTextPixelSize(12);
+
+            contentLayout->addWidget(messageText);
+            contentLayout->addSpacing(10);
+            contentLayout->addWidget(warningText);
+
+            reloadDialog->setCentralWidget(contentWidget);
+
+
+            // 取消按钮
+            connect(reloadDialog, &ElaContentDialog::leftButtonClicked, this, [&]() {
+                reloadDialog->close();
+            });
+
+            // 确认按钮
+            connect(reloadDialog, &ElaContentDialog::rightButtonClicked, this, [&]() {
+                reloadDialog->close();
+                openConfigFile(_currentFilePath);
+            });
+            reloadDialog->exec();
+        }
     }
 
     void ConfigPage::validateConfig()

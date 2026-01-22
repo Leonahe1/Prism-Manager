@@ -170,6 +170,9 @@ void SettingsPage::initUI()
     }
     logLevelsLayout->addStretch();
 
+    // 初始化 CheckBox 样式
+    updateCheckBoxStyles();
+
     loggingLayout->addWidget(logLevelsRow);
 
     scrollLayout->addWidget(loggingCard);
@@ -430,6 +433,32 @@ void SettingsPage::onThemeChanged()
     for (QWidget* card : _cards) {
         if (card) {
             card->setStyleSheet(cardStyle);
+        }
+    }
+
+    // 更新 CheckBox 样式
+    updateCheckBoxStyles();
+}
+
+void SettingsPage::updateCheckBoxStyles()
+{
+    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+    QString textColor = isDark ? "#FFFFFF" : "#000000";
+
+    // 为所有日志级别 CheckBox 设置统一的文本颜色
+    QString checkBoxStyle = QString(R"(
+        ElaCheckBox {
+            color: %1;
+        }
+        ElaCheckBox::indicator {
+            width: 18px;
+            height: 18px;
+        }
+    )").arg(textColor);
+
+    for (ElaCheckBox* checkBox : _logLevelCheckBoxes) {
+        if (checkBox) {
+            checkBox->setStyleSheet(checkBoxStyle);
         }
     }
 }

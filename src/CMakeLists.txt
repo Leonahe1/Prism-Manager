@@ -1,5 +1,10 @@
 # Prism 主程序
 
+# 资源文件
+set(PRISM_RESOURCES
+    ${CMAKE_SOURCE_DIR}/assets/Prism.qrc
+)
+
 # 收集源文件
 set(PRISM_SOURCES
     main.cpp
@@ -70,7 +75,7 @@ set(PRISM_SOURCES
 )
 
 # 创建可执行文件
-add_executable(Prism ${PRISM_SOURCES})
+add_executable(Prism ${PRISM_SOURCES} ${PRISM_RESOURCES})
 
 # 链接 Qt 库
 target_link_libraries(Prism PRIVATE

@@ -76,6 +76,11 @@ private:
      */
     void onThemeChanged();
 
+    /**
+     * @brief 更新 CheckBox 样式（主题适配）
+     */
+    void updateCheckBoxStyles();
+
     // ========================================
     // UI 控件
     // ========================================

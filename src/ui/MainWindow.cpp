@@ -98,12 +98,12 @@ namespace Prism {
         setFocusPolicy(Qt::StrongFocus);
 
         // 窗口基础属性
-        setWindowIcon(QIcon(":/Resource/Image/icon.png"));
-        resize(1400, 900);
+        setWindowIcon(QIcon(":/Resource/Image/GTTC_Program_Icon.ico"));
+        resize(1600, 1000);
         setWindowTitle("Prism - 仿真配置集成环境");
 
         // 用户信息卡片（左下角）
-        // setUserInfoCardPixmap(QPixmap(":/Resource/Image/avatar.png"));
+        setUserInfoCardPixmap(QPixmap(":/Resource/Image/avatar.png"));
         setUserInfoCardTitle("Prism Manager");
         setUserInfoCardSubTitle("v1.0.0 - 国腾天创");
 
