@@ -10,9 +10,13 @@
 #include <QFileInfo>
 #include <QDir>
 
+#include "ElaDxgi.h"
+#include "ElaPushButton.h"
+#include "ElaTheme.h"
+
 CreateSnapshotDialog::CreateSnapshotDialog(const QString& projectPath,
-                                         const QStringList& configFiles,
-                                         QWidget* parent)
+                                           const QStringList& configFiles,
+                                           QWidget* parent)
     : ElaContentDialog(parent)
     , _projectPath(projectPath)
     , _configFiles(configFiles)
@@ -70,7 +74,19 @@ void CreateSnapshotDialog::setupUI() {
     _filesLayout = new QVBoxLayout(filesWidget);
     _filesLayout->setSpacing(8);
     _filesLayout->setContentsMargins(10, 5, 10, 5);
+    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+    QString textColor = isDark ? "#FFFFFF" : "#000000";
 
+    // 为所有日志级别 CheckBox 设置统一的文本颜色
+    QString checkBoxStyle = QString(R"(
+        ElaCheckBox {
+            color: %1;
+        }
+        ElaCheckBox::indicator {
+            width: 18px;
+            height: 18px;
+        }
+    )").arg(textColor);
     // 添加文件复选框
     for (const QString& filePath : _configFiles) {
         // 显示相对路径
@@ -79,6 +95,7 @@ void CreateSnapshotDialog::setupUI() {
         ElaCheckBox* checkBox = new ElaCheckBox(relativePath, filesWidget);
         checkBox->setChecked(true);
         checkBox->setProperty("filePath", filePath);  // 存储完整路径
+        checkBox->setStyleSheet(checkBoxStyle);
         connect(checkBox, &ElaCheckBox::stateChanged, this, &CreateSnapshotDialog::onFileCheckBoxChanged);
 
         _fileCheckBoxes.append(checkBox);
@@ -105,7 +122,11 @@ void CreateSnapshotDialog::setupUI() {
     setLeftButtonText("取消");
     setMiddleButtonText("");  // 隐藏中间按钮
     setRightButtonText("创建快照");
-
+    // 手动隐藏中间按钮
+    QList<ElaPushButton*> buttons = this->findChildren<ElaPushButton*>();
+    if (buttons.size() >= 3) {
+        buttons[1]->setVisible(false);  // 中间按钮是第二个按钮
+    }
     // 设置对话框大小
     setFixedSize(500, 600);
 }

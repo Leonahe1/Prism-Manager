@@ -1,5 +1,10 @@
 # Prism 主程序
 
+# 资源文件
+set(PRISM_RESOURCES
+    ${CMAKE_SOURCE_DIR}/assets/Prism.qrc
+)
+
 # 收集源文件
 set(PRISM_SOURCES
     main.cpp
@@ -13,6 +18,8 @@ set(PRISM_SOURCES
     core/JsonParser.cpp
     core/YamlParser.h
     core/YamlParser.cpp
+    core/XmlParser.h
+    core/XmlParser.cpp
     core/ParserFactory.h
     core/ParserFactory.cpp
     core/ProcessRunner.h
@@ -57,6 +64,8 @@ set(PRISM_SOURCES
     ui/syntax/JsonHighlighter.cpp
     ui/syntax/YamlHighlighter.h
     ui/syntax/YamlHighlighter.cpp
+    ui/syntax/XmlHighlighter.h
+    ui/syntax/XmlHighlighter.cpp
 
     # UI - Components
     ui/components/CodeEditor.h
@@ -70,7 +79,7 @@ set(PRISM_SOURCES
 )
 
 # 创建可执行文件
-add_executable(Prism ${PRISM_SOURCES})
+add_executable(Prism ${PRISM_SOURCES} ${PRISM_RESOURCES})
 
 # 链接 Qt 库
 target_link_libraries(Prism PRIVATE

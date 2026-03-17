@@ -18,6 +18,7 @@
 #include <QStackedWidget>
 #include <QScrollArea>
 #include <QRegularExpression>
+#include <QToolButton>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -43,6 +44,8 @@
 #include "syntax/IniHighlighter.h"
 #include "syntax/JsonHighlighter.h"
 #include "syntax/YamlHighlighter.h"
+#include "syntax/XmlHighlighter.h"
+#include "core/XmlParser.h"
 
 #include <QDesktopServices>
 #include <QUrl>
@@ -486,6 +489,11 @@ namespace Prism {
             delete item;
         }
 
+        if (_contentModel) {
+            _contentModel->clear();
+            _contentModel->setHorizontalHeaderLabels({"配置项", "值"});
+        }
+
         _formWidgetMap.clear();
         _formCards.clear();
         _formLayout->addStretch();
@@ -656,20 +664,53 @@ namespace Prism {
                                    "没有打开的配置文件", 1500);
             return;
         }
-
         if (_isModified)
         {
-            QMessageBox::StandardButton reply;
-            reply = QMessageBox::question(this, "重新加载确认",
-                                          "当前文件已修改，重新加载将丢失未保存的更改。\n确定要继续吗？",
-                                          QMessageBox::Yes | QMessageBox::No);
-            if (reply == QMessageBox::No)
-            {
-                return;
-            }
-        }
+            ElaContentDialog* reloadDialog = new ElaContentDialog(this);
+            reloadDialog->setWindowTitle("重新加载确认");
+            reloadDialog->setLeftButtonText("取消");
+            reloadDialog->setMiddleButtonText("");  // 设置为空文本
+            reloadDialog->setRightButtonText("确认");
 
-        openConfigFile(_currentFilePath);
+            // 手动隐藏中间按钮（ElaContentDialog 没有提供直接隐藏的方法）
+            // 通过查找子控件来隐藏中间按钮
+            QList<ElaPushButton*> buttons = reloadDialog->findChildren<ElaPushButton*>();
+            if (buttons.size() >= 3) {
+                buttons[1]->setVisible(false);  // 中间按钮是第二个按钮
+            }
+
+            // 创建对话框内容
+            QWidget* contentWidget = new QWidget(reloadDialog);
+            QVBoxLayout* contentLayout = new QVBoxLayout(contentWidget);
+            contentLayout->setContentsMargins(20, 20, 20, 20);
+
+            ElaText* messageText = new ElaText(contentWidget);
+            messageText->setText(QString("当前文件已修改，重新加载将丢失未保存的更改。"));
+            messageText->setTextPixelSize(15);
+
+            ElaText* warningText = new ElaText(contentWidget);
+            warningText->setText("⚠ 确定要继续吗？");
+            warningText->setTextPixelSize(12);
+
+            contentLayout->addWidget(messageText);
+            contentLayout->addSpacing(10);
+            contentLayout->addWidget(warningText);
+
+            reloadDialog->setCentralWidget(contentWidget);
+
+
+            // 取消按钮
+            connect(reloadDialog, &ElaContentDialog::leftButtonClicked, this, [&]() {
+                reloadDialog->close();
+            });
+
+            // 确认按钮
+            connect(reloadDialog, &ElaContentDialog::rightButtonClicked, this, [&]() {
+                reloadDialog->close();
+                openConfigFile(_currentFilePath);
+            });
+            reloadDialog->exec();
+        }
     }
 
     void ConfigPage::validateConfig()
@@ -807,7 +848,7 @@ namespace Prism {
             this,
             "选择配置文件",
             defaultPath,
-            "配置文件 (*.ini *.json *.yaml *.yml *.conf);;所有文件 (*.*)"
+            "配置文件 (*.ini *.json *.yaml *.yml *.conf *.xml);;所有文件 (*.*)"
         );
 
         if (!filePath.isEmpty())
@@ -928,6 +969,10 @@ namespace Prism {
         {
             return "yaml";
         }
+        else if (suffix == "xml")
+        {
+            return "xml";
+        }
         else
         {
             return "unknown";
@@ -951,6 +996,8 @@ namespace Prism {
             _syntaxHighlighter = new YamlHighlighter(_configEditor->document());
         } else if (format == "ini" || format == "conf" || format == "cfg") {
             _syntaxHighlighter = new IniHighlighter(_configEditor->document());
+        } else if (format == "xml") {
+            _syntaxHighlighter = new XmlHighlighter(_configEditor->document());
         }
 
         // 设置主题
@@ -1084,24 +1131,26 @@ namespace Prism {
         } else if (value.type() == QVariant::List) {
             QVariantList list = value.toList();
 
-            if (list.isEmpty()) {
-                // 空数组：直接存储
-                result[prefix] = variantToConfigItem(value);
-            } else if (list.first().type() == QVariant::Map) {
-                // 对象数组：展开每个元素的字段（递归）
-                for (int i = 0; i < list.size(); ++i) {
-                    QVariantMap objMap = list[i].toMap();
-                    for (auto objIt = objMap.constBegin(); objIt != objMap.constEnd(); ++objIt) {
-                        // 键格式：products[0].productId, data.list[0].config.enable 等
-                        QString arrayKey = QString("%1[%2].%3").arg(prefix).arg(i).arg(objIt.key());
-                        // 递归处理，支持嵌套的 Map 和数组
-                        flattenVariantToConfigItems(arrayKey, objIt.value(), result);
+                if (list.isEmpty()) {
+                    // 空数组：直接存储
+                    result[prefix] = variantToConfigItem(value);
+                } else if (list.first().type() == QVariant::Map) {
+                    // 对象数组：展开每个元素的字段（递归）
+                    for (int i = 0; i < list.size(); ++i) {
+                        QVariantMap objMap = list[i].toMap();
+                        for (auto objIt = objMap.constBegin(); objIt != objMap.constEnd(); ++objIt) {
+                            // 为了保证按字符串排序时仍按数值顺序，从 0 开始使用固定宽度的零填充索引
+                            // 键格式：products[0000].productId, data.list[0001].config.enable 等
+                            QString indexStr = QString("%1").arg(i, 4, 10, QLatin1Char('0'));
+                            QString arrayKey = QString("%1[%2].%3").arg(prefix, indexStr, objIt.key());
+                            // 递归处理，支持嵌套的 Map 和数组
+                            flattenVariantToConfigItems(arrayKey, objIt.value(), result);
+                        }
                     }
+                } else {
+                    // 简单数组（数字或字符串数组）：直接存储
+                    result[prefix] = variantToConfigItem(value);
                 }
-            } else {
-                // 简单数组（数字或字符串数组）：直接存储
-                result[prefix] = variantToConfigItem(value);
-            }
         } else {
             // 简单值：直接转换
             result[prefix] = variantToConfigItem(value);
@@ -1197,6 +1246,198 @@ namespace Prism {
             emptyHint->setTextPixelSize(14);
             emptyHint->setAlignment(Qt::AlignCenter);
             _formLayout->insertWidget(0, emptyHint);
+            return;
+        }
+
+        // XML：按节点路径折叠展示（树形），属性（@xxx）和值都作为叶子项显示
+        if (_currentFormat.toLower() == "xml") {
+            // 创建一个可折叠节点容器：标题 + 可展开内容区
+            auto createFoldNode = [this](const QString& title, QWidget* parent) -> QPair<QWidget*, QVBoxLayout*> {
+                QWidget* nodeCard = new QWidget(parent);
+                nodeCard->setObjectName("ConfigCard");
+                nodeCard->setStyleSheet(getCardStyleSheet());
+                _formCards.append(nodeCard);
+
+                QVBoxLayout* outer = new QVBoxLayout(nodeCard);
+                outer->setContentsMargins(12, 10, 12, 10);
+                outer->setSpacing(6);
+
+                QToolButton* headerBtn = new QToolButton(nodeCard);
+                headerBtn->setText(title);
+                headerBtn->setCheckable(true);
+                headerBtn->setChecked(true);
+                headerBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                headerBtn->setArrowType(Qt::DownArrow);
+                headerBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+                outer->addWidget(headerBtn);
+
+                QWidget* body = new QWidget(nodeCard);
+                QVBoxLayout* bodyLayout = new QVBoxLayout(body);
+                bodyLayout->setContentsMargins(10, 4, 0, 4);
+                bodyLayout->setSpacing(4);
+                outer->addWidget(body);
+
+                connect(headerBtn, &QToolButton::toggled, nodeCard, [headerBtn, body](bool on) {
+                    body->setVisible(on);
+                    headerBtn->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
+                });
+
+                return {nodeCard, bodyLayout};
+            };
+
+            // 创建叶子行（复用现有控件类型与修改逻辑）
+            auto createValueWidget = [this](const ConfigItem& item, QWidget* rowWidget) -> QWidget* {
+                QWidget* valueWidget = nullptr;
+                switch (item.type) {
+                    case ConfigValueType::Boolean: {
+                        ElaToggleSwitch* toggleSwitch = new ElaToggleSwitch(rowWidget);
+                        QString lowerValue = item.value.toLower();
+                        bool isTrue = (lowerValue == "true" || lowerValue == "yes" ||
+                                       lowerValue == "on" || lowerValue == "1");
+                        toggleSwitch->setIsToggled(isTrue);
+                        connect(toggleSwitch, &ElaToggleSwitch::toggled, this, [this]() {
+                            _isModified = true;
+                            _saveButton->setEnabled(true);
+                            if (!_currentFilePath.isEmpty()) emit configFileModified(_currentFilePath);
+                        });
+                        valueWidget = toggleSwitch;
+                        break;
+                    }
+                    case ConfigValueType::Integer: {
+                        ElaSpinBox* spinBox = new ElaSpinBox(rowWidget);
+                        spinBox->setMinimum(-2147483648);
+                        spinBox->setMaximum(2147483647);
+                        spinBox->setValue(item.value.toInt());
+                        spinBox->setFixedHeight(32);
+                        spinBox->setFixedWidth(150);
+                        connect(spinBox, QOverload<int>::of(&ElaSpinBox::valueChanged), this, [this]() {
+                            _isModified = true;
+                            _saveButton->setEnabled(true);
+                            if (!_currentFilePath.isEmpty()) emit configFileModified(_currentFilePath);
+                        });
+                        valueWidget = spinBox;
+                        break;
+                    }
+                    case ConfigValueType::Double: {
+                        ElaDoubleSpinBox* doubleSpinBox = new ElaDoubleSpinBox(rowWidget);
+                        doubleSpinBox->setMinimum(-1e10);
+                        doubleSpinBox->setMaximum(1e10);
+                        doubleSpinBox->setDecimals(6);
+                        doubleSpinBox->setValue(item.value.toDouble());
+                        doubleSpinBox->setFixedHeight(32);
+                        doubleSpinBox->setFixedWidth(150);
+                        connect(doubleSpinBox, QOverload<double>::of(&ElaDoubleSpinBox::valueChanged), this, [this]() {
+                            _isModified = true;
+                            _saveButton->setEnabled(true);
+                            if (!_currentFilePath.isEmpty()) emit configFileModified(_currentFilePath);
+                        });
+                        valueWidget = doubleSpinBox;
+                        break;
+                    }
+                    case ConfigValueType::String:
+                    case ConfigValueType::Array:
+                    default: {
+                        ElaLineEdit* lineEdit = new ElaLineEdit(rowWidget);
+                        lineEdit->setText(item.value);
+                        lineEdit->setFixedHeight(32);
+                        lineEdit->setFixedWidth(350);
+                        connect(lineEdit, &ElaLineEdit::textChanged, this, [this]() {
+                            _isModified = true;
+                            _saveButton->setEnabled(true);
+                            if (!_currentFilePath.isEmpty()) emit configFileModified(_currentFilePath);
+                        });
+                        valueWidget = lineEdit;
+                        break;
+                    }
+                }
+                return valueWidget;
+            };
+
+            // path -> 对应节点的 bodyLayout（用于把子节点/叶子挂到正确位置）
+            QMap<QString, QVBoxLayout*> nodeLayoutByPath;
+
+            // 根容器（插到 stretch 之前）
+            auto rootPair = createFoldNode("XML", _formContainer);
+            _formLayout->insertWidget(_formLayout->count() - 1, rootPair.first);
+            nodeLayoutByPath[""] = rootPair.second;
+
+            // 为了避免超大 XML 在组件模式下一次性创建过多控件导致界面卡死，这里做一个安全上限
+            const int MAX_XML_ITEMS = 5000;
+            int processedCount = 0;
+
+            // 逐条 key 插入树
+            for (auto it = configData.constBegin(); it != configData.constEnd(); ++it) {
+                const QString fullKey = it.key();
+                const ConfigItem& item = it.value();
+
+                const QStringList parts = fullKey.split('.', Qt::SkipEmptyParts);
+                if (parts.isEmpty()) continue;
+
+                // 逐级创建节点（除最后一段外）
+                QString currentPath;
+                QVBoxLayout* parentLayout = nodeLayoutByPath.value("", nullptr);
+                for (int i = 0; i < parts.size() - 1; ++i) {
+                    const QString& seg = parts[i];
+                    currentPath = currentPath.isEmpty() ? seg : currentPath + "." + seg;
+
+                    if (!nodeLayoutByPath.contains(currentPath)) {
+                        auto nodePair = createFoldNode(seg, _formContainer);
+                        parentLayout->addWidget(nodePair.first);
+                        nodeLayoutByPath[currentPath] = nodePair.second;
+                    }
+
+                    parentLayout = nodeLayoutByPath.value(currentPath);
+                }
+
+                // 叶子行
+                const QString leafKey = parts.last();
+                QWidget* rowWidget = new QWidget(_formContainer);
+                QHBoxLayout* rowLayout = new QHBoxLayout(rowWidget);
+                rowLayout->setContentsMargins(0, 2, 0, 2);
+                rowLayout->setSpacing(12);
+
+                ElaText* keyLabel = new ElaText(leafKey, rowWidget);
+                keyLabel->setTextPixelSize(13);
+                rowLayout->addWidget(keyLabel);
+                rowLayout->addStretch();
+
+                QWidget* valueWidget = createValueWidget(item, rowWidget);
+                rowLayout->addWidget(valueWidget);
+
+                // 挂到父节点 layout 上
+                if (parentLayout) {
+                    parentLayout->addWidget(rowWidget);
+                } else {
+                    rootPair.second->addWidget(rowWidget);
+                }
+
+                // 保持原始 key 作为路径，方便 collect/save
+                _formWidgetMap[fullKey] = valueWidget;
+
+                // 安全保护：超过一定数量后不再继续创建，避免 UI 卡死
+                ++processedCount;
+                if (processedCount >= MAX_XML_ITEMS) {
+                    QWidget* warnWidget = new QWidget(_formContainer);
+                    QHBoxLayout* warnLayout = new QHBoxLayout(warnWidget);
+                    warnLayout->setContentsMargins(0, 6, 0, 6);
+
+                    ElaText* warnText = new ElaText(
+                        QString("已加载前 %1 个配置项，其余因数量过多未展开（建议改用源码模式查看/编辑）")
+                            .arg(MAX_XML_ITEMS),
+                        warnWidget);
+                    warnText->setTextPixelSize(12);
+                    warnLayout->addWidget(warnText);
+
+                    if (parentLayout) {
+                        parentLayout->addWidget(warnWidget);
+                    } else {
+                        rootPair.second->addWidget(warnWidget);
+                    }
+                    break;
+                }
+            }
+
+            qDebug() << "构建 XML 折叠表单成功，共" << configData.size() << "个配置项";
             return;
         }
 
@@ -3388,6 +3629,60 @@ namespace Prism {
         }
 
         confirmDialog->deleteLater();
+    }
+
+    void ConfigPage::buildContentTree(const QVariantMap& data)
+    {
+        _contentModel->clear();
+        _contentModel->setHorizontalHeaderLabels({"配置项", "值"});
+        
+        QStandardItem* rootItem = _contentModel->invisibleRootItem();
+        addVariantToTree(rootItem, data);
+        
+        _configContentTreeView->expandAll();
+    }
+
+    void ConfigPage::addVariantToTree(QStandardItem* parentItem, const QVariantMap& data)
+    {
+        for (auto it = data.constBegin(); it != data.constEnd(); ++it) {
+            QString key = it.key();
+            QVariant value = it.value();
+            
+            QList<QStandardItem*> row;
+            QStandardItem* keyItem = new QStandardItem(key);
+            keyItem->setEditable(false);
+            
+            if (value.type() == QVariant::Map) {
+                row << keyItem << new QStandardItem("");
+                parentItem->appendRow(row);
+                addVariantToTree(keyItem, value.toMap());
+            } else if (value.type() == QVariant::List) {
+                QVariantList list = value.toList();
+                row << keyItem << new QStandardItem(QString("[%1 items]").arg(list.size()));
+                parentItem->appendRow(row);
+                
+                // 处理列表中的项
+                for (int i = 0; i < list.size(); ++i) {
+                    QList<QStandardItem*> childRow;
+                    QStandardItem* indexItem = new QStandardItem(QString("[%1]").arg(i));
+                    indexItem->setEditable(false);
+                    
+                    QVariant listItem = list[i];
+                    if (listItem.type() == QVariant::Map) {
+                        childRow << indexItem << new QStandardItem("");
+                        keyItem->appendRow(childRow);
+                        addVariantToTree(indexItem, listItem.toMap());
+                    } else {
+                        childRow << indexItem << new QStandardItem(listItem.toString());
+                        keyItem->appendRow(childRow);
+                    }
+                }
+            } else {
+                QStandardItem* valueItem = new QStandardItem(value.toString());
+                row << keyItem << valueItem;
+                parentItem->appendRow(row);
+            }
+        }
     }
 
 } // namespace Prism

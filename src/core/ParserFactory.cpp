@@ -2,6 +2,7 @@
 #include "IniParser.h"
 #include "JsonParser.h"
 #include "YamlParser.h"
+#include "XmlParser.h"
 #include <QFileInfo>
 #include <QDebug>
 
@@ -80,6 +81,8 @@ ConfigParserPtr ParserFactory::createParser(ConfigFormat format) {
             return std::make_shared<JsonParser>();
         case ConfigFormat::YAML:
             return std::make_shared<YamlParser>();
+        case ConfigFormat::XML:
+            return std::make_shared<XmlParser>();
         default:
             return nullptr;
     }

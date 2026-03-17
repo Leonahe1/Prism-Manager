@@ -69,6 +69,16 @@ private:
     void initUI();
     void setupConnections();
 
+    /**
+     * @brief 更新 CheckBox 样式（主题适配）
+     */
+    void updateCheckBoxStyles();
+
+    /**
+     * @brief 响应主题变化
+     */
+    void onThemeChanged();
+
     // 过滤复选框
     ElaCheckBox* m_infoCheck{ nullptr };
     ElaCheckBox* m_successCheck{ nullptr };
