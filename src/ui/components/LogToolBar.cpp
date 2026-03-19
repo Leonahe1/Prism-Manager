@@ -7,6 +7,7 @@
 #include "ElaLineEdit.h"
 #include "ElaPushButton.h"
 #include "ElaText.h"
+#include "ElaTheme.h"
 
 namespace Prism {
 
@@ -111,6 +112,12 @@ void LogToolBar::setupConnections()
 
     // 清空按钮
     connect(m_clearBtn, &ElaPushButton::clicked, this, &LogToolBar::clearRequested);
+
+    // 响应主题变化
+    connect(eTheme, &ElaTheme::themeModeChanged, this, &LogToolBar::onThemeChanged);
+
+    // 初始化样式
+    updateCheckBoxStyles();
 }
 
 QStringList LogToolBar::getFilterLevels() const
@@ -154,6 +161,39 @@ void LogToolBar::onSearchTextChanged(const QString& text)
 void LogToolBar::onSearchTriggered()
 {
     emit searchRequested(getSearchKeyword());
+}
+
+void LogToolBar::updateCheckBoxStyles()
+{
+    bool isDark = eTheme->getThemeMode() == ElaThemeType::Dark;
+    QString textColor = isDark ? "#FFFFFF" : "#000000";
+
+    // 为所有 CheckBox 设置统一的文本颜色
+    QString checkBoxStyle = QString(R"(
+        ElaCheckBox {
+            color: %1;
+        }
+        ElaCheckBox::indicator {
+            width: 18px;
+            height: 18px;
+        }
+    )").arg(textColor);
+
+    QList<ElaCheckBox*> checkBoxes = {
+        m_infoCheck, m_successCheck, m_warningCheck, m_errorCheck,
+        m_debugCheck, m_stdoutCheck, m_stderrCheck
+    };
+
+    for (ElaCheckBox* checkBox : checkBoxes) {
+        if (checkBox) {
+            checkBox->setStyleSheet(checkBoxStyle);
+        }
+    }
+}
+
+void LogToolBar::onThemeChanged()
+{
+    updateCheckBoxStyles();
 }
 
 } // namespace Prism

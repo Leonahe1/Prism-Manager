@@ -9,6 +9,7 @@
 #include <QVariant>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QStandardItem>
 
 #ifdef YAML_CPP_AVAILABLE
 #include <yaml-cpp/yaml.h>
@@ -227,6 +228,18 @@ private:
     QString collectFormToText();
 
     /**
+     * @brief 构建树形界面 (性能优化版)
+     * @param data 原始层级数据
+     */
+    void buildContentTree(const QVariantMap& data);
+
+    /**
+     * @brief 递归将 QVariant 数据添加到树节点
+     * @param parentItem 父节点
+     * @param data 数据内容
+     */
+    void addVariantToTree(QStandardItem* parentItem, const QVariantMap& data);
+    /**
      * @brief 清空表单控件
      */
     void clearFormWidgets();
@@ -444,10 +457,14 @@ private:
     ElaPlainTextEdit* _configEditor{ nullptr };
     SyntaxHighlighter* _syntaxHighlighter{ nullptr };  // 语法高亮器
 
-    // 组件模式
+    // 组件模式 (旧: 卡片式布局)
     QScrollArea* _formScrollArea{ nullptr };
     QWidget* _formContainer{ nullptr };
     QVBoxLayout* _formLayout{ nullptr };
+
+    // 组件模式 (新: 树形展示)
+    ElaTreeView* _configContentTreeView{ nullptr };
+    QStandardItemModel* _contentModel{ nullptr };
 
     // 按钮
     QPushButton* _saveButton{ nullptr };
